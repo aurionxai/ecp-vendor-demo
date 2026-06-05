@@ -1,0 +1,915 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>ECP · Vendor Reporting Console — mockup</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700;12..96,800&family=IBM+Plex+Sans:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --bg:#100e0b; --bg2:#15120d; --panel:#17140f; --panel2:#1d1812;
+    --line:rgba(245,228,200,.10); --line2:rgba(245,228,200,.18);
+    --ink:#efe9dd; --mut:#a39a89; --dim:#6f6757;
+    --amber:#f5a623; --amber-soft:#ffce7a;
+    --teal:#5fc6c2; --green:#63d6a0; --red:#ff6f60; --violet:#b69cff;
+    --r:14px; --mono:"JetBrains Mono",monospace;
+    --disp:"Bricolage Grotesque",sans-serif; --body:"IBM Plex Sans",sans-serif;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;padding:0}
+  body{
+    background:var(--bg); color:var(--ink); font-family:var(--body);
+    font-size:14px; line-height:1.5; -webkit-font-smoothing:antialiased;
+    min-height:100vh; overflow-x:hidden;
+  }
+  /* atmosphere */
+  .bg{position:fixed; inset:0; z-index:-2; pointer-events:none}
+  .bg::before{content:"";position:absolute;inset:0;
+    background:
+      radial-gradient(1100px 600px at 78% -8%, rgba(245,166,35,.13), transparent 60%),
+      radial-gradient(900px 700px at 0% 100%, rgba(95,198,194,.08), transparent 55%),
+      var(--bg);}
+  .bg::after{content:"";position:absolute;inset:0;opacity:.5;
+    background-image:radial-gradient(rgba(245,228,200,.05) 1px, transparent 1px);
+    background-size:26px 26px; mask-image:radial-gradient(120% 90% at 50% 0%,#000,transparent 80%);}
+  .grain{position:fixed;inset:0;z-index:-1;pointer-events:none;opacity:.04;mix-blend-mode:overlay;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");}
+
+  /* numerics */
+  .num{font-family:var(--mono); font-feature-settings:"tnum" 1; letter-spacing:-.02em}
+  .mono{font-family:var(--mono)}
+  h1,h2,h3,h4{font-family:var(--disp); font-weight:800; letter-spacing:-.02em; margin:0}
+  .ey{font-family:var(--mono); font-size:10.5px; letter-spacing:.22em; text-transform:uppercase; color:var(--dim)}
+
+  /* ===== PORTAL ===== */
+  #portal{position:fixed;inset:0;z-index:50;display:grid;place-items:center;padding:32px;
+    background:radial-gradient(900px 600px at 50% -10%,rgba(245,166,35,.16),transparent 60%),var(--bg);}
+  #portal.hide{display:none}
+  .portal-card{width:min(720px,100%);animation:rise .7s cubic-bezier(.2,.8,.2,1) both}
+  .pmark{display:flex;align-items:center;gap:12px;justify-content:center;margin-bottom:6px}
+  .glyph{width:34px;height:34px;border-radius:9px;display:grid;place-items:center;
+    background:linear-gradient(145deg,var(--amber),#b9701a);color:#1a1206;font-family:var(--disp);font-weight:800;font-size:19px;
+    box-shadow:0 8px 24px rgba(245,166,35,.3), inset 0 1px 0 rgba(255,255,255,.35)}
+  .portal-card h1{font-size:30px;text-align:center;margin-top:14px}
+  .portal-sub{text-align:center;color:var(--mut);margin:8px 0 26px;font-size:13.5px}
+  .who{display:flex;align-items:center;gap:10px;justify-content:center;margin-bottom:26px;color:var(--mut);font-size:12.5px}
+  .who .dot{width:7px;height:7px;border-radius:50%;background:var(--green);box-shadow:0 0 10px var(--green)}
+  .apps{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .app{position:relative;text-align:left;border:1px solid var(--line);background:linear-gradient(180deg,var(--panel2),var(--panel));
+    border-radius:18px;padding:22px;cursor:pointer;transition:.25s;overflow:hidden}
+  .app:hover{transform:translateY(-4px);border-color:var(--line2);box-shadow:0 18px 40px rgba(0,0,0,.4)}
+  .app .tag{font-family:var(--mono);font-size:10px;letter-spacing:.18em;text-transform:uppercase;color:var(--dim)}
+  .app h3{font-size:21px;margin:10px 0 6px}
+  .app p{color:var(--mut);font-size:12.5px;margin:0 0 18px;min-height:34px}
+  .app .go{display:inline-flex;align-items:center;gap:8px;font-family:var(--mono);font-size:12px;color:var(--amber)}
+  .app .ribbon{position:absolute;top:16px;right:16px;font-family:var(--mono);font-size:9.5px;letter-spacing:.14em;
+    padding:4px 8px;border-radius:999px;border:1px solid var(--line2);color:var(--mut)}
+  .app.ecp::after{content:"";position:absolute;inset:0;background:radial-gradient(300px 160px at 80% 0,rgba(245,166,35,.14),transparent 60%);pointer-events:none}
+  .app.ssdi::after{content:"";position:absolute;inset:0;background:radial-gradient(300px 160px at 80% 0,rgba(95,198,194,.12),transparent 60%);pointer-events:none}
+  .portal-foot{text-align:center;color:var(--dim);font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;margin-top:24px}
+
+  /* ===== APP SHELL ===== */
+  #app{display:none;min-height:100vh;flex-direction:column}
+  #app.show{display:flex}
+  .topbar{position:sticky;top:0;z-index:30;display:flex;align-items:center;gap:18px;
+    padding:13px 22px;background:rgba(16,14,11,.82);backdrop-filter:blur(14px);border-bottom:1px solid var(--line)}
+  .brand{display:flex;align-items:center;gap:11px;cursor:pointer}
+  .brand .glyph{width:28px;height:28px;font-size:15px;border-radius:8px}
+  .brand b{font-family:var(--disp);font-weight:800;font-size:15px;letter-spacing:-.01em}
+  .badge{font-family:var(--mono);font-size:9.5px;letter-spacing:.16em;padding:3px 7px;border-radius:6px;
+    border:1px solid var(--line2);color:var(--amber);background:rgba(245,166,35,.08)}
+  nav.tabs{display:flex;gap:2px;margin-left:8px}
+  nav.tabs button{font-family:var(--body);font-size:13px;color:var(--mut);background:none;border:0;cursor:pointer;
+    padding:8px 14px;border-radius:9px;transition:.18s;position:relative}
+  nav.tabs button:hover{color:var(--ink);background:rgba(245,228,200,.04)}
+  nav.tabs button.on{color:var(--ink)}
+  nav.tabs button.on::after{content:"";position:absolute;left:14px;right:14px;bottom:-1px;height:2px;background:var(--amber);border-radius:2px}
+  .spacer{flex:1}
+  .ctrl{display:flex;align-items:center;gap:9px}
+  .seg{display:flex;border:1px solid var(--line2);border-radius:9px;overflow:hidden;background:var(--panel)}
+  .seg button{font-family:var(--mono);font-size:11px;letter-spacing:.04em;color:var(--mut);background:none;border:0;cursor:pointer;padding:7px 11px;transition:.15s}
+  .seg button.on{background:var(--amber);color:#1a1206;font-weight:700}
+  .seg.teal button.on{background:var(--teal);color:#06201f}
+  select.role{font-family:var(--mono);font-size:11.5px;color:var(--ink);background:var(--panel);border:1px solid var(--line2);
+    border-radius:9px;padding:8px 10px;cursor:pointer}
+  .apps-btn{font-family:var(--mono);font-size:11px;color:var(--mut);background:var(--panel);border:1px solid var(--line2);
+    border-radius:9px;padding:8px 11px;cursor:pointer;display:flex;align-items:center;gap:7px}
+  .apps-btn:hover{color:var(--ink);border-color:var(--line2)}
+
+  main{padding:26px 24px 60px;max-width:1240px;width:100%;margin:0 auto}
+  .view{display:none;animation:rise .5s cubic-bezier(.2,.8,.2,1) both}
+  .view.on{display:block}
+
+  .pagehead{display:flex;align-items:flex-end;justify-content:space-between;gap:20px;margin-bottom:22px;flex-wrap:wrap}
+  .pagehead h2{font-size:26px}
+  .pagehead .meta{color:var(--mut);font-size:12.5px;margin-top:6px}
+  .lensbanner{display:inline-flex;align-items:center;gap:8px;font-family:var(--mono);font-size:10.5px;letter-spacing:.1em;
+    padding:6px 11px;border-radius:999px;border:1px solid;text-transform:uppercase}
+  .lensbanner.true{color:var(--amber);border-color:rgba(245,166,35,.4);background:rgba(245,166,35,.07)}
+  .lensbanner.adj{color:var(--teal);border-color:rgba(95,198,194,.35);background:rgba(95,198,194,.07)}
+  .lensbanner .d{width:6px;height:6px;border-radius:50%;background:currentColor;box-shadow:0 0 8px currentColor}
+
+  /* funnel + KPIs */
+  .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:14px}
+  .kpi{border:1px solid var(--line);background:linear-gradient(180deg,var(--panel2),var(--panel));border-radius:var(--r);padding:16px 17px;position:relative;overflow:hidden}
+  .kpi .ey{margin-bottom:12px}
+  .kpi .v{font-family:var(--mono);font-size:30px;font-weight:700;letter-spacing:-.03em;line-height:1}
+  .kpi .sub{font-size:11.5px;color:var(--mut);margin-top:8px}
+  .kpi .spark{position:absolute;right:14px;top:14px;font-family:var(--mono);font-size:10.5px;color:var(--green)}
+  .kpi.accent{border-color:rgba(245,166,35,.3)}
+  .kpi.accent::after{content:"";position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--amber)}
+  .kpi .v.money{color:var(--amber-soft)}
+
+  .funnel{display:flex;align-items:stretch;gap:0;border:1px solid var(--line);border-radius:var(--r);overflow:hidden;margin-bottom:26px}
+  .fstep{flex:1;padding:14px 16px;position:relative;background:var(--panel)}
+  .fstep+.fstep{border-left:1px solid var(--line)}
+  .fstep .ey{margin-bottom:8px}
+  .fstep .fv{font-family:var(--mono);font-size:20px;font-weight:700}
+  .fstep .fp{font-size:11px;color:var(--dim);margin-top:3px}
+  .fstep .bar{height:4px;border-radius:3px;margin-top:11px;background:linear-gradient(90deg,var(--amber),#7a4a13)}
+
+  .panel{border:1px solid var(--line);background:linear-gradient(180deg,var(--panel2),var(--panel));border-radius:var(--r);overflow:hidden}
+  .panel .ph{display:flex;align-items:center;justify-content:space-between;padding:15px 18px;border-bottom:1px solid var(--line)}
+  .panel .ph h3{font-size:15px}
+  .panel .ph .hint{font-family:var(--mono);font-size:10.5px;color:var(--dim);letter-spacing:.08em}
+
+  table{width:100%;border-collapse:collapse}
+  th{font-family:var(--mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:var(--dim);text-align:right;padding:11px 16px;font-weight:500;border-bottom:1px solid var(--line)}
+  th.l{text-align:left}
+  td{padding:12px 16px;text-align:right;border-bottom:1px solid rgba(245,228,200,.05);font-size:13px}
+  td.l{text-align:left}
+  tr:last-child td{border-bottom:0}
+  .vrow td{background:rgba(245,228,200,.025)}
+  .vrow .vn{font-family:var(--disp);font-weight:700;font-size:14px;display:flex;align-items:center;gap:9px}
+  .vrow .chev{color:var(--dim);transition:.2s;font-family:var(--mono)}
+  .vrow.open .chev{transform:rotate(90deg);color:var(--amber)}
+  .vrow{cursor:pointer}
+  .srow td{color:var(--mut)}
+  .srow .pub{font-family:var(--mono);font-size:12px;color:var(--ink)}
+  .srow .did{font-family:var(--mono);font-size:11px;color:var(--dim)}
+  .srow td.l .ind{padding-left:22px;position:relative}
+  .srow td.l .ind::before{content:"";position:absolute;left:6px;top:50%;width:9px;height:1px;background:var(--line2)}
+  .chip{font-family:var(--mono);font-size:10px;padding:2px 7px;border-radius:5px;border:1px solid var(--line2);color:var(--mut)}
+  .chip.scrub{color:var(--violet);border-color:rgba(182,156,255,.3)}
+  .val-amber{color:var(--amber-soft);font-family:var(--mono);font-weight:500}
+  .val-strike{color:var(--dim);text-decoration:line-through;font-family:var(--mono);font-size:11px;margin-right:7px}
+
+  .grid2{display:grid;grid-template-columns:1.5fr 1fr;gap:18px;align-items:start}
+  @media(max-width:920px){.grid2{grid-template-columns:1fr}.kpis{grid-template-columns:1fr 1fr}nav.tabs{display:none}}
+
+  /* invoices */
+  .invlist td .st{font-family:var(--mono);font-size:10px;letter-spacing:.1em;padding:3px 9px;border-radius:999px;text-transform:uppercase}
+  .st.draft{color:var(--amber);border:1px solid rgba(245,166,35,.4);background:rgba(245,166,35,.07)}
+  .st.locked{color:var(--teal);border:1px solid rgba(95,198,194,.35);background:rgba(95,198,194,.07)}
+  .st.sent{color:var(--green);border:1px solid rgba(99,214,160,.3);background:rgba(99,214,160,.06)}
+  .btn{font-family:var(--mono);font-size:11.5px;letter-spacing:.04em;border-radius:8px;padding:8px 13px;cursor:pointer;border:1px solid var(--line2);background:var(--panel);color:var(--ink);transition:.16s}
+  .btn:hover{border-color:var(--amber);color:var(--amber)}
+  .btn.primary{background:var(--amber);color:#1a1206;border-color:var(--amber);font-weight:700}
+  .btn.primary:hover{filter:brightness(1.08);color:#1a1206}
+  .scen{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:16px 18px}
+  .scen .cell{border:1px solid var(--line);border-radius:10px;padding:13px 14px;position:relative}
+  .scen .cell.best{border-color:rgba(245,166,35,.45);background:rgba(245,166,35,.05)}
+  .scen .cell .lab{font-family:var(--mono);font-size:10px;letter-spacing:.1em;color:var(--dim);text-transform:uppercase}
+  .scen .cell .c{font-family:var(--mono);font-size:22px;font-weight:700;margin-top:8px}
+  .scen .cell .d{font-size:11px;color:var(--mut);margin-top:3px}
+  .scen .cell .star{position:absolute;top:11px;right:12px;color:var(--amber);font-size:11px;font-family:var(--mono)}
+
+  /* admin */
+  .cards{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  @media(max-width:760px){.cards{grid-template-columns:1fr}}
+  .cfg{display:flex;flex-direction:column;gap:0}
+  .cfg .row{display:flex;align-items:center;justify-content:space-between;padding:13px 18px;border-bottom:1px solid rgba(245,228,200,.05)}
+  .cfg .row:last-child{border-bottom:0}
+  .cfg .row .k{color:var(--mut);font-size:12.5px}
+  .cfg .row .v{font-family:var(--mono);font-size:12.5px}
+  .uq td .assign{font-family:var(--mono);font-size:10.5px;padding:5px 10px;border-radius:7px;border:1px solid var(--line2);background:none;color:var(--amber);cursor:pointer}
+  .uq td .assign:hover{background:rgba(245,166,35,.1)}
+  .drop{margin:16px 18px;border:1.5px dashed var(--line2);border-radius:12px;padding:26px;text-align:center;color:var(--mut);font-size:12.5px}
+  .drop b{color:var(--ink);font-family:var(--mono);font-size:12px}
+  .note{color:var(--dim);font-size:11.5px;margin-top:18px;padding:13px 16px;border:1px solid var(--line);border-radius:10px;background:rgba(245,228,200,.02);font-family:var(--mono);line-height:1.6}
+  .note b{color:var(--amber)}
+
+  @keyframes rise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+  .stagger>*{animation:rise .5s cubic-bezier(.2,.8,.2,1) both}
+  .stagger>*:nth-child(1){animation-delay:.03s}.stagger>*:nth-child(2){animation-delay:.08s}
+  .stagger>*:nth-child(3){animation-delay:.13s}.stagger>*:nth-child(4){animation-delay:.18s}
+  .toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(20px);opacity:0;
+    background:var(--panel2);border:1px solid var(--line2);border-radius:11px;padding:12px 18px;font-size:12.5px;
+    z-index:60;transition:.3s;pointer-events:none;box-shadow:0 12px 40px rgba(0,0,0,.5)}
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+  .toast .k{color:var(--amber);font-family:var(--mono)}
+
+  /* ===== LOGIN ===== */
+  #login{position:fixed;inset:0;z-index:60;display:grid;place-items:center;padding:32px;
+    background:radial-gradient(800px 600px at 50% -10%,rgba(245,166,35,.15),transparent 60%),var(--bg)}
+  #login.hide{display:none}
+  .login-card{width:min(390px,100%);animation:rise .6s cubic-bezier(.2,.8,.2,1) both}
+  .login-card .pmark{margin-bottom:16px}
+  .login-card h1{font-size:26px;text-align:center}
+  .login-card .portal-sub{margin:8px 0 26px}
+  .field{margin-bottom:13px}
+  .field label{display:block;font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--dim);margin-bottom:7px}
+  .field input,.field select{width:100%;background:var(--panel);border:1px solid var(--line2);border-radius:10px;
+    padding:12px 13px;color:var(--ink);font-family:var(--body);font-size:14px;outline:none;transition:.15s}
+  .field input:focus,.field select:focus{border-color:var(--amber);box-shadow:0 0 0 3px rgba(245,166,35,.12)}
+  .login-card .btn.primary{width:100%;padding:13px;justify-content:center;display:flex;font-size:13px;margin-top:6px}
+  .login-meta{text-align:center;color:var(--dim);font-family:var(--mono);font-size:10px;letter-spacing:.1em;margin-top:18px}
+  .login-meta a{color:var(--mut);cursor:pointer;text-decoration:underline}
+
+  /* ===== MODAL (assign) ===== */
+  .modal{position:fixed;inset:0;z-index:70;display:none;place-items:center;padding:24px;background:rgba(8,7,5,.72);backdrop-filter:blur(5px)}
+  .modal.show{display:grid;animation:rise .25s ease both}
+  .modal-card{width:min(440px,100%);border:1px solid var(--line2);background:linear-gradient(180deg,var(--panel2),var(--panel));
+    border-radius:16px;overflow:hidden;box-shadow:0 30px 80px rgba(0,0,0,.6)}
+  .modal-card .mh{padding:16px 20px;border-bottom:1px solid var(--line);display:flex;justify-content:space-between;align-items:center}
+  .modal-card .mh h3{font-size:16px}
+  .modal-card .mh .x{cursor:pointer;color:var(--dim);font-family:var(--mono);font-size:15px}
+  .modal-card .mh .x:hover{color:var(--ink)}
+  .modal-card .mb{padding:18px 20px}
+  .bf{margin:4px 0 2px;padding:12px 14px;border:1px solid rgba(95,198,194,.3);background:rgba(95,198,194,.06);
+    border-radius:10px;font-size:12.5px;color:var(--teal);font-family:var(--mono);line-height:1.5}
+  .bf b{color:var(--ink)}
+  .modal-card .mf{padding:14px 20px;border-top:1px solid var(--line);display:flex;gap:10px;justify-content:flex-end}
+
+  /* ===== DATA HEALTH ===== */
+  .hstats{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:20px}
+  @media(max-width:920px){.hstats{grid-template-columns:repeat(2,1fr)}}
+  .hstat{border:1px solid var(--line);background:linear-gradient(180deg,var(--panel2),var(--panel));border-radius:12px;padding:14px 15px}
+  .hstat .ey{margin-bottom:10px}
+  .hstat .v{font-family:var(--mono);font-size:21px;font-weight:700;letter-spacing:-.02em;display:flex;align-items:center;gap:8px}
+  .hstat .sub{font-size:11px;color:var(--dim);margin-top:6px}
+  .pulse{width:8px;height:8px;border-radius:50%;background:var(--green);display:inline-block;
+    box-shadow:0 0 0 0 rgba(99,214,160,.5);animation:pulse 2.2s infinite}
+  @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(99,214,160,.45)}70%{box-shadow:0 0 0 8px transparent}100%{box-shadow:0 0 0 0 transparent}}
+  .st.ok{color:var(--green);border:1px solid rgba(99,214,160,.3);background:rgba(99,214,160,.06)}
+  .st.dupe{color:var(--mut);border:1px solid var(--line2)}
+  .st.skip{color:var(--amber);border:1px solid rgba(245,166,35,.3);background:rgba(245,166,35,.06)}
+  .fname{font-family:var(--mono);font-size:12px;color:var(--ink)}
+
+  /* =====================================================================
+     READABILITY PASS — light, high-contrast, single-accent override.
+     Declared last so it wins. Keeps all class names/structure intact.
+     ===================================================================== */
+  :root{
+    --bg:#f5f4f1; --bg2:#efede8; --panel:#ffffff; --panel2:#ffffff;
+    --line:#e6e3dd; --line2:#d3cfc6;
+    --ink:#1a1916; --mut:#55524b; --dim:#7c7970;
+    --amber:#b45309; --amber-soft:#92400e; --amber-fill:#f59e0b;
+    --teal:#0e7490; --green:#15803d; --red:#be3a2f; --violet:#6d28d9;
+  }
+  body{background:var(--bg);color:var(--ink)}
+  .bg::before{background:var(--bg)!important}
+  .bg::after,.grain{display:none!important}
+
+  #login,#portal{background:var(--bg)!important}
+  .portal-sub,.who{color:var(--mut)}
+  .portal-foot,.login-meta{color:var(--dim)}
+
+  /* brand / fills keep a BRIGHT amber with dark text (readable) */
+  .glyph{background:linear-gradient(145deg,#f59e0b,#d97706)!important;color:#3a2406!important;
+    box-shadow:0 4px 14px rgba(245,158,11,.3),inset 0 1px 0 rgba(255,255,255,.5)!important}
+  .btn.primary{background:var(--amber-fill);color:#3a2406;border-color:#e08c08}
+  .btn.primary:hover{filter:brightness(1.03);color:#3a2406}
+  .seg button.on{background:var(--amber-fill);color:#3a2406}
+  .seg.teal button.on{background:var(--teal);color:#fff}
+  nav.tabs button.on::after,.kpi.accent::after{background:var(--amber-fill)}
+  .kpi.accent{border-color:#f0d9ad}
+
+  /* surfaces → flat white, thin light borders, soft shadow */
+  .topbar{background:rgba(255,255,255,.9);border-bottom:1px solid var(--line)}
+  .app,.kpi,.panel,.hstat,.fstep,.modal-card,.seg,select.role,.apps-btn,.field input,.field select,.drop,.toast{
+    background:#fff!important}
+  .app{border-color:var(--line)}
+  .app::after{display:none!important}
+  .app:hover{box-shadow:0 12px 28px rgba(0,0,0,.08);transform:translateY(-3px)}
+  .kpi,.panel,.hstat,.modal-card{box-shadow:0 1px 2px rgba(0,0,0,.03)}
+  .note{background:#faf9f6;border-color:var(--line)}
+  .modal{background:rgba(26,25,22,.32)}
+
+  /* typography contrast */
+  nav.tabs button{color:var(--mut)} nav.tabs button.on{color:var(--ink)}
+  nav.tabs button:hover{background:rgba(0,0,0,.04);color:var(--ink)}
+  .ey{color:var(--dim);letter-spacing:.14em}
+  .kpi .v.money,.val-amber{color:var(--amber)}
+  .val-strike{color:#9b988f}
+  .badge{color:var(--amber);background:#fdf4e3;border-color:#f0d9ad}
+
+  /* tables — comfortable, dark text, visible row lines */
+  th{color:var(--dim);border-bottom:1px solid var(--line)}
+  td{color:var(--ink);border-bottom:1px solid #efece6}
+  .vrow td{background:#faf8f4}
+  .vrow:hover td{background:#f5f2ec}
+  .srow td{color:var(--mut)} .srow .pub{color:var(--ink)} .srow .did{color:var(--dim)}
+  .srow td.l .ind::before{background:var(--line2)}
+  .chip{color:var(--mut);border-color:var(--line2)}
+  .chip.scrub{color:var(--violet);border-color:#d9cdf5}
+
+  /* lens + status as readable tinted labels */
+  .lensbanner.true{color:var(--amber);border-color:#f0d9ad;background:#fdf6ea}
+  .lensbanner.adj{color:var(--teal);border-color:#bfe4ea;background:#ecf8fb}
+  .st.draft{color:var(--amber);border-color:#f0d9ad;background:#fdf6ea}
+  .st.locked{color:var(--teal);border-color:#bfe4ea;background:#ecf8fb}
+  .st.sent{color:var(--green);border-color:#bfe6c8;background:#eef9f1}
+  .st.ok{color:var(--green);border-color:#bfe6c8;background:#eef9f1}
+  .st.dupe{color:var(--mut);border-color:var(--line2);background:#f3f1ec}
+  .st.skip{color:var(--amber);border-color:#f0d9ad;background:#fdf6ea}
+  .scen .cell.best{border-color:#f0d9ad;background:#fdf8ee}
+  .scen .cell .star{color:var(--amber)}
+  .bf{color:#0c627a;border-color:#bfe4ea;background:#ecf8fb}
+  .funnel .bar{background:linear-gradient(90deg,#f59e0b,#fbcf6b)}
+  .kpi .spark{color:var(--green)}
+  .toast{color:var(--ink);border-color:var(--line2);box-shadow:0 10px 30px rgba(0,0,0,.12)}
+  .uq td .assign{color:var(--amber)} .uq td .assign:hover{background:#fdf4e3}
+</style>
+</head>
+<body>
+<div class="bg"></div><div class="grain"></div>
+
+<!-- ============ LOGIN ============ -->
+<section id="login">
+  <div class="login-card">
+    <div class="pmark"><div class="glyph">A</div></div>
+    <h1>Aurion Console</h1>
+    <p class="portal-sub">Vendor &amp; conversion reporting — interactive prototype</p>
+    <button class="btn primary" onclick="doLogin()">Enter demo →</button>
+    <div class="login-meta">PROTOTYPE · NO REAL LOGIN · SAMPLE DATA ONLY</div>
+  </div>
+</section>
+
+<!-- ============ PORTAL ============ -->
+<section id="portal">
+  <div class="portal-card">
+    <div class="pmark"><div class="glyph">A</div></div>
+    <h1>Aurion Console</h1>
+    <p class="portal-sub">One admin sign-in. Two reporting systems. Pick where you're headed.</p>
+    <div class="who"><span class="dot"></span> Signed in as <b style="color:var(--ink);margin:0 2px">admin@aurionx.ai</b> · Administrator</div>
+    <div class="apps">
+      <div class="app ssdi" onclick="toast('SSDI is a separate siloed app — mockup focuses on ECP')">
+        <span class="ribbon">kd-2 · live</span>
+        <div class="tag">Buyer / client side</div>
+        <h3>SSDI Retainer Checker</h3>
+        <p>Salesforce-driven conversion &amp; retainer reporting. Postgres rebuild of Domain&nbsp;2.</p>
+        <span class="go">Open dashboard →</span>
+      </div>
+      <div class="app ecp" onclick="enterApp()">
+        <span class="ribbon" style="color:var(--amber);border-color:rgba(245,166,35,.4)">new</span>
+        <div class="tag">Vendor / partner side</div>
+        <h3>ECP Vendor Reporting</h3>
+        <p>Billable calls, scrub &amp; weekly invoices for call-center partners. CallShaper → S3.</p>
+        <span class="go">Open dashboard →</span>
+      </div>
+    </div>
+    <div class="portal-foot">SIGNED ADMIN SESSION · portal.aurionx · ssdi.aurionx · ecp.aurionx</div>
+  </div>
+</section>
+
+<!-- ============ ECP APP ============ -->
+<div id="app">
+  <header class="topbar">
+    <div class="brand" onclick="goPortal()" title="Back to portal">
+      <div class="glyph">A</div><b>Aurion</b>
+    </div>
+    <span class="badge">ECP</span>
+    <nav class="tabs" id="tabs">
+      <button class="on" data-v="dash">Dashboard</button>
+      <button data-v="inv">Invoices</button>
+      <button data-v="team" style="display:none">Team</button>
+      <button data-v="admin">Admin</button>
+      <button data-v="health">Data health</button>
+    </nav>
+    <div class="spacer"></div>
+    <div class="ctrl">
+      <select class="role" id="role" title="View as">
+        <option value="admin">Admin · all vendors</option>
+        <option value="manager">Vendor · LivMed</option>
+        <option value="sub">Sub-vendor · RedPeak A</option>
+      </select>
+      <div class="seg" id="lensSeg" title="Admin reporting lens">
+        <button class="on" data-lens="true">TRUE</button>
+        <button data-lens="adj">Vendor-facing</button>
+      </div>
+      <button class="apps-btn" onclick="goPortal()">⊞ Apps</button>
+    </div>
+  </header>
+
+  <main>
+    <!-- DASHBOARD -->
+    <section class="view on" id="v-dash">
+      <div class="pagehead">
+        <div>
+          <h2 id="dashTitle">Conversion &amp; billing overview</h2>
+          <div class="meta">Broadcast week · <span class="mono">Mon Jun 1 – Sun Jun 7, 2026</span> · America/New_York</div>
+        </div>
+        <div id="lensBannerWrap"></div>
+      </div>
+
+      <div class="kpis stagger" id="kpis"></div>
+
+      <div class="funnel stagger" id="funnel"></div>
+
+      <div class="panel">
+        <div class="ph">
+          <h3>Vendor → sub-vendor (pubID) breakdown</h3>
+          <span class="hint" id="methodHint">FIFO · first billable instance</span>
+        </div>
+        <table>
+          <thead><tr>
+            <th class="l">Vendor / sub-vendor</th>
+            <th>DID</th>
+            <th id="thScrub">Scrub</th>
+            <th>Rate</th>
+            <th>Billable</th>
+            <th>Amount (AR)</th>
+          </tr></thead>
+          <tbody id="breakdown"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- INVOICES -->
+    <section class="view" id="v-inv">
+      <div class="pagehead">
+        <div>
+          <h2>Weekly invoices</h2>
+          <div class="meta" id="invHeadAdmin">Monday draft → review → <b style="color:var(--ink)">finalize &amp; manual lock</b> · no auto-lock · Unknowns don't block</div>
+          <div class="meta" id="invHeadVendor" style="display:none">Your weekly invoices · <b style="color:var(--ink)">paid &amp; outstanding</b></div>
+        </div>
+        <div class="ctrl" id="invMethodWrap">
+          <span class="ey">Keeper method</span>
+          <div class="seg" id="methodSeg">
+            <button class="on" data-m="fifo">FIFO</button>
+            <button data-m="lifo">LIFO</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="invAdmin">
+      <div class="grid2">
+        <div class="panel">
+          <div class="ph"><h3>Draft invoices · this week</h3><span class="hint">per vendor → line items by sub-vendor</span></div>
+          <table class="invlist"><thead><tr>
+            <th class="l">Vendor</th><th>Sub-vendors</th><th>Billable</th><th>Amount</th><th>Status</th>
+          </tr></thead><tbody id="invBody"></tbody></table>
+        </div>
+
+        <div class="panel" style="align-self:start">
+          <div class="ph"><h3>LivMed · scenario review</h3><span class="hint">method × scrub</span></div>
+          <div class="scen" id="scen"></div>
+          <div style="display:flex;gap:10px;padding:0 18px 18px">
+            <button class="btn primary" onclick="toast('Invoice LOCKED — snapshot + BilledLead written in one txn')">⏏ Finalize &amp; lock LivMed</button>
+            <button class="btn" onclick="toast('PDF + CSV rendered (mock)')">Export PDF / CSV</button>
+          </div>
+        </div>
+      </div>
+      <div class="note">Lock writes an <b>immutable Invoice snapshot</b> (calcMethodUsed, scrubRateUsed, perCallRateCentsUsed) <b>and</b> every billed consumer to the permanent <b>BilledLead</b> ledger in one transaction — "once paid, never payable again."</div>
+      </div><!-- /invAdmin -->
+
+      <div id="invVendor" style="display:none">
+        <div class="panel">
+          <div class="ph"><h3>Your invoices</h3><span class="hint">weekly · broadcast week (Mon–Sun)</span></div>
+          <table><thead><tr><th class="l">Week</th><th>Billable</th><th>Amount</th><th>Status</th><th></th></tr></thead>
+            <tbody id="invVendorBody"></tbody></table>
+        </div>
+        <div class="note">Amounts are <b>net of scrub</b> at your per-call rate. <b>Paid</b> has cleared · <b>Unpaid</b> is sent and awaiting payment · <b>Draft</b> is the current open week, not yet locked.</div>
+      </div>
+    </section>
+
+    <!-- TEAM (vendor-issued sub-vendor logins) -->
+    <section class="view" id="v-team">
+      <div class="pagehead"><div><h2>Team &amp; logins</h2>
+        <div class="meta">Invite your sub-vendors — each gets a login scoped to <b style="color:var(--ink)">their own</b> reporting</div></div></div>
+      <div class="panel">
+        <div class="ph"><h3>Sub-vendor logins</h3><span class="hint">manager-issued · read-only</span></div>
+        <table><thead><tr><th class="l">Sub-vendor</th><th class="l">pubID</th><th class="l">Login email</th><th>Status</th><th></th></tr></thead>
+          <tbody id="teamBody"></tbody></table>
+      </div>
+      <div class="note">Each sub-vendor login sees <b>only its own pubID</b> — its calls, qualified %, paid calls and invoices, nothing from sibling sub-vendors. Switch the top-right role to <b>Sub-vendor</b> to preview that view.</div>
+    </section>
+
+    <!-- ADMIN -->
+    <section class="view" id="v-admin">
+      <div class="pagehead"><div><h2>Admin console</h2><div class="meta">Billing config, vendors, Unknown queue &amp; master ledger</div></div></div>
+
+      <div class="cards stagger">
+        <div class="panel">
+          <div class="ph"><h3>Billing engine config</h3><span class="hint">audit-logged</span></div>
+          <div class="cfg">
+            <div class="row"><span class="k">Payable threshold</span><span class="v val-amber">preXfer + postXfer ≥ 630s</span></div>
+            <div class="row"><span class="k">Keeper method</span><span class="v">FIFO <span style="color:var(--dim)">/ LIFO selectable · default first-billable</span></span></div>
+            <div class="row"><span class="k">Special-rule hooks</span><span class="v" style="color:var(--teal)">closest-date · no-downgrade · DID-auth</span></div>
+            <div class="row"><span class="k">Prior-sale guard</span><span class="v">Transfer Sale · postXfer &gt; 120s</span></div>
+            <div class="row"><span class="k">Scrub</span><span class="v" style="color:var(--violet)">deterministic · hash(callID) &lt; rate</span></div>
+            <div class="row"><span class="k">Default rate</span><span class="v val-amber">$250.00 / call</span></div>
+            <div class="row"><span class="k">Ingest interval</span><span class="v">15 min · multi-bucket S3</span></div>
+          </div>
+        </div>
+
+        <div class="panel">
+          <div class="ph"><h3>Vendors &amp; rates</h3><span class="hint">variable per vendor / sub</span></div>
+          <table><thead><tr><th class="l">Vendor</th><th>Subs</th><th>Rate</th><th>Scrub</th></tr></thead>
+            <tbody id="adminVendors"></tbody></table>
+        </div>
+
+        <div class="panel">
+          <div class="ph"><h3>Unknown DID queue</h3><span class="hint">excluded · doesn't block lock</span></div>
+          <table class="uq"><thead><tr><th class="l">DID</th><th>Calls</th><th>First seen</th><th></th></tr></thead>
+            <tbody id="unknownQ"></tbody></table>
+        </div>
+
+        <div class="panel">
+          <div class="ph"><h3>Master ledger</h3><span class="hint">validate → preview → apply</span></div>
+          <div class="drop">⬆ Drop <b>master_ledger.xlsx</b><br><span style="color:var(--dim)">vendorDID · pubID · Vendor Name · Vendor Key — 1:1 DID↔pubID</span></div>
+          <div class="cfg"><div class="row"><span class="k">Last applied</span><span class="v">Jun 4 · 142 mappings</span></div>
+            <div class="row"><span class="k">Resolved / Unknown</span><span class="v"><span style="color:var(--green)">140</span> / <span style="color:var(--amber)">2</span></span></div></div>
+        </div>
+      </div>
+      <div class="note">No reassignment — a pubID/DID belongs to one sub-vendor permanently; ownership changes <b>mint a fresh pubID + DID</b>. Phones are hashed at ingest (salted HMAC) — <b>no raw PII at rest</b>.</div>
+    </section>
+
+    <!-- DATA HEALTH -->
+    <section class="view" id="v-health">
+      <div class="pagehead"><div><h2>Data health</h2>
+        <div class="meta"><span class="pulse"></span> Ingest worker healthy · last poll <span class="mono">2 min ago</span> · 15-min interval</div></div></div>
+
+      <div class="hstats stagger" id="hstats"></div>
+
+      <div class="grid2">
+        <div class="panel">
+          <div class="ph"><h3>Recent ingest runs</h3><span class="hint">idempotent · upsert by callID</span></div>
+          <table><thead><tr><th class="l">Time</th><th class="l">File</th><th>Rows</th><th>Status</th></tr></thead>
+            <tbody id="runsBody"></tbody></table>
+        </div>
+        <div class="panel" style="align-self:start">
+          <div class="ph"><h3>S3 buckets</h3><span class="hint">multi-bucket poller</span></div>
+          <table><thead><tr><th class="l">Bucket</th><th>Region</th><th>Last file</th></tr></thead>
+            <tbody id="bucketsBody"></tbody></table>
+          <div class="cfg">
+            <div class="row"><span class="k">Unknown DIDs (excluded)</span><span class="v"><span style="color:var(--amber)">2</span> · 46 calls quarantined</span></div>
+            <div class="row"><span class="k">Malformed rows skipped</span><span class="v">3 <span style="color:var(--dim)">(logged · non-fatal)</span></span></div>
+            <div class="row"><span class="k">Cross-file dupes merged</span><span class="v" style="color:var(--green)">lossless · by callID</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="note">Unmatched / Unknown never fabricate a call — they're quarantined and surfaced here, then cleared via the <b>Unknown-DID assign</b> flow (Admin). Re-ingesting a processed file is a no-op (<b>ProcessedFile</b> + upsert by <b>callID</b>).</div>
+    </section>
+  </main>
+</div>
+
+<!-- ============ ASSIGN MODAL ============ -->
+<div class="modal" id="assignModal">
+  <div class="modal-card">
+    <div class="mh"><h3>Assign Unknown DID</h3><span class="x" onclick="closeAssign()">✕</span></div>
+    <div class="mb">
+      <div class="field"><label>DID number</label><input id="amDid" readonly /></div>
+      <div class="field"><label>Vendor</label><select id="amVendor" onchange="amPreview()"></select></div>
+      <div class="field"><label>New sub-vendor pubID</label><input id="amPub" placeholder="e.g. livmed-inbound" oninput="amPreview()" /></div>
+      <div class="bf" id="amBf"></div>
+    </div>
+    <div class="mf">
+      <button class="btn" onclick="closeAssign()">Cancel</button>
+      <button class="btn primary" onclick="applyAssign()">Assign &amp; back-fill</button>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+// ---------- data ----------
+const VENDORS = [
+  {name:'LivMed', key:'LIVMED', rate:250, scrub:.08, subs:[
+    {name:'LivMed — Daypart',  pub:'livmed-day',   did:'8447120033', total:1850, qual:224, fifo:210, lifo:213, login:{status:'active', email:'ops@livmed-day.com'}},
+    {name:'LivMed — Overnight',pub:'livmed-night', did:'8447120061', total:1480, qual:170, fifo:162, lifo:160, login:{status:'none',   email:''}},
+  ]},
+  {name:'RedPeak Media', key:'REDPEAK', rate:265, scrub:.05, subs:[
+    {name:'RedPeak A', pub:'redpeak-a', did:'2138840097', total:1320, qual:126, fifo:120, lifo:121, login:{status:'active',  email:'a@redpeak.com'}},
+    {name:'RedPeak B', pub:'redpeak-b', did:'2138840102', total:1280, qual:124, fifo:118, lifo:119, login:{status:'invited', email:'b@redpeak.com'}},
+    {name:'RedPeak C', pub:'redpeak-c', did:'2138840145', total:920,  qual:84,  fifo:80,  lifo:79,  login:{status:'none',    email:''}},
+  ]},
+  {name:'Coastal Connect', key:'COASTAL', rate:240, scrub:.12, subs:[
+    {name:'Coastal Prime', pub:'coastal-a', did:'7274451180', total:2010, qual:223, fifo:219, lifo:223, login:{status:'active', email:'team@coastalconnect.io'}},
+  ]},
+];
+const UNKNOWN = [
+  {did:'3105560148', calls:34, seen:'May 28'},
+  {did:'4694412290', calls:12, seen:'May 30'},
+];
+const INGESTED = 10210, QUALIFIED = 951;
+
+// ---------- state ----------
+let S = {view:'dash', role:'admin', lens:'true', method:'fifo'};
+
+const $ = s=>document.querySelector(s);
+const money = n => '$'+n.toLocaleString('en-US');
+const adj = (n,sc)=> Math.round(n*(1-sc));
+function agg(vs,m){
+  let calls=0,qual=0,bTrue=0,bAdj=0,arTrue=0,arAdj=0;
+  vs.forEach(v=>v.subs.forEach(s=>{
+    const c=s[m], a=adj(c,v.scrub);
+    calls+=s.total; qual+=s.qual; bTrue+=c; bAdj+=a; arTrue+=c*v.rate; arAdj+=a*v.rate;
+  }));
+  return {calls,qual,bTrue,bAdj,arTrue,arAdj};
+}
+
+function visibleVendors(){
+  if(S.role==='manager') return VENDORS.filter(v=>v.key==='LIVMED');
+  if(S.role==='sub') return VENDORS.filter(v=>v.key==='REDPEAK').map(v=>({...v,subs:v.subs.filter(s=>s.pub==='redpeak-a')}));
+  return VENDORS;
+}
+function effLens(){ return S.role==='admin' ? S.lens : 'adj'; } // partners only ever see adjusted
+
+// ---------- render ----------
+function render(){
+  const lens = effLens(), m = S.method;
+  const vs = visibleVendors();
+
+  // scoped aggregate
+  const A = agg(vs, m);
+  const showAdj = lens==='adj';
+  const billable = showAdj?A.bAdj:A.bTrue, ar = showAdj?A.arAdj:A.arTrue;
+
+  // lens banner + title
+  const bw = $('#lensBannerWrap');
+  if(S.role==='admin'){
+    bw.innerHTML = showAdj
+      ? `<span class="lensbanner adj"><span class="d"></span>Vendor-facing · adjusted (net of scrub)</span>`
+      : `<span class="lensbanner true"><span class="d"></span>TRUE · admin only · un-scrubbed</span>`;
+  } else {
+    bw.innerHTML = `<span class="lensbanner adj"><span class="d"></span>${S.role==='manager'?'Vendor':'Sub-vendor'} · your data only</span>`;
+  }
+  $('#dashTitle').textContent = S.role==='admin' ? 'Conversion & billing overview'
+      : S.role==='manager' ? 'LivMed — your overview' : 'RedPeak A — my reporting';
+
+  if(S.role==='admin'){
+    $('#kpis').innerHTML = `
+      <div class="kpi"><div class="ey">Calls ingested</div><div class="v num">${INGESTED.toLocaleString()}</div><div class="sub">union of inbound + outbound, deduped by callID</div></div>
+      <div class="kpi"><div class="ey">Qualified ≥ 630s</div><div class="v num">${QUALIFIED.toLocaleString()}</div><div class="sub">${(QUALIFIED/INGESTED*100).toFixed(1)}% of ingested</div></div>
+      <div class="kpi accent"><div class="ey">Billable ${showAdj?'· net':'· gross'}</div><div class="v num">${billable.toLocaleString()}${showAdj?` <span class="val-strike" style="font-size:14px">${A.bTrue}</span>`:''}</div><div class="sub">${showAdj?`after ~scrub · ${m.toUpperCase()} keeper`:`pre-scrub · ${m.toUpperCase()} keeper`}</div></div>
+      <div class="kpi accent"><div class="ey">AR · this week</div><div class="v money num">${money(ar)}</div><div class="sub">${billable} billable × variable rate</div></div>`;
+    $('#funnel').innerHTML = [
+      ['Ingested',INGESTED,100],
+      ['≥ 630s',QUALIFIED, QUALIFIED/INGESTED*100],
+      [showAdj?'Billable · net':'Billable · gross', billable, billable/INGESTED*100*9],
+    ].map(([k,v,w])=>`<div class="fstep"><div class="ey">${k}</div><div class="fv num">${v.toLocaleString()}</div><div class="fp">${(v/INGESTED*100).toFixed(1)}% of ingested</div><div class="bar" style="width:${Math.max(8,Math.min(100,w))}%"></div></div>`).join('');
+  } else {
+    const paid=A.bAdj, earn=A.arAdj;
+    $('#kpis').innerHTML = `
+      <div class="kpi"><div class="ey">Total calls</div><div class="v num">${A.calls.toLocaleString()}</div><div class="sub">routed through your DIDs this week</div></div>
+      <div class="kpi"><div class="ey">Qualified ≥ 630s</div><div class="v num">${A.qual.toLocaleString()}</div><div class="sub">${(A.qual/A.calls*100).toFixed(1)}% of total calls</div></div>
+      <div class="kpi accent"><div class="ey">Calls paid</div><div class="v num">${paid.toLocaleString()}</div><div class="sub">${(paid/A.qual*100).toFixed(0)}% of qualified · net of scrub</div></div>
+      <div class="kpi accent"><div class="ey">Earnings · this week</div><div class="v money num">${money(earn)}</div><div class="sub">${paid} paid calls × your rate</div></div>`;
+    $('#funnel').innerHTML = [
+      ['Total calls',A.calls],
+      ['Qualified ≥ 630s',A.qual],
+      ['Paid',paid],
+    ].map(([k,v])=>`<div class="fstep"><div class="ey">${k}</div><div class="fv num">${v.toLocaleString()}</div><div class="fp">${(v/A.calls*100).toFixed(1)}% of total calls</div><div class="bar" style="width:${Math.max(7,v/A.calls*100)}%"></div></div>`).join('');
+  }
+
+  // breakdown
+  $('#thScrub').style.display = (S.role==='admin' && !showAdj) ? '' : 'none';
+  $('#methodHint').textContent = m==='fifo' ? 'FIFO · first billable instance' : 'LIFO · last billable instance';
+  let rows='';
+  vs.forEach((v,vi)=>{
+    let vc=0,var_=0;
+    const subrows = v.subs.map(s=>{
+      const c=s[m], a=adj(c,v.scrub), use=showAdj?a:c, amt=use*v.rate;
+      vc+=use; var_+=amt;
+      const billCell = showAdj ? `<span class="val-strike">${c}</span><span class="val-amber">${a}</span>` : `<span class="val-amber">${c}</span>`;
+      return `<tr class="srow" data-g="${vi}" style="display:none">
+        <td class="l"><span class="ind"><span class="pub">${s.pub}</span><div style="color:var(--dim);font-size:11px">${s.name}</div></span></td>
+        <td class="did">${s.did}</td>
+        <td style="display:${(S.role==='admin'&&!showAdj)?'':'none'}"><span class="chip scrub">${(v.scrub*100).toFixed(0)}%</span></td>
+        <td class="mono">${money(v.rate)}</td>
+        <td>${billCell}</td>
+        <td class="val-amber">${money(amt)}</td></tr>`;
+    }).join('');
+    rows += `<tr class="vrow" data-g="${vi}" onclick="toggleV(${vi})">
+        <td class="l"><span class="vn"><span class="chev">›</span>${v.name} <span class="chip">${v.key}</span></span></td>
+        <td class="did">${v.subs.length} sub${v.subs.length>1?'s':''}</td>
+        <td style="display:${(S.role==='admin'&&!showAdj)?'':'none'}"><span class="chip scrub">${(v.scrub*100).toFixed(0)}%</span></td>
+        <td class="mono">${money(v.rate)}</td>
+        <td class="val-amber">${vc.toLocaleString()}</td>
+        <td class="val-amber">${money(var_)}</td></tr>${subrows}`;
+  });
+  $('#breakdown').innerHTML = rows;
+
+  renderInvoices();
+  updateInvoiceMode();
+}
+
+// invoices: admin tooling vs vendor paid/unpaid history
+function updateInvoiceMode(){
+  const admin = S.role==='admin';
+  $('#invAdmin').style.display = admin?'':'none';
+  $('#invVendor').style.display = admin?'none':'';
+  $('#invHeadAdmin').style.display = admin?'':'none';
+  $('#invHeadVendor').style.display = admin?'none':'';
+  $('#invMethodWrap').style.display = admin?'':'none';
+  if(!admin) renderVendorInvoices();
+}
+function renderVendorInvoices(){
+  const vs=visibleVendors(), m=S.method, A=agg(vs,m);
+  const base=A.bAdj, blend=A.arAdj/Math.max(1,A.bAdj);
+  const weeks=[
+    ['Jun 1 – Jun 7',  base,                 'draft'],
+    ['May 25 – May 31',Math.round(base*0.96),'unpaid'],
+    ['May 18 – May 24',Math.round(base*1.02),'paid'],
+    ['May 11 – May 17',Math.round(base*0.94),'paid'],
+    ['May 4 – May 10', Math.round(base*0.99),'paid'],
+    ['Apr 27 – May 3', Math.round(base*0.91),'paid'],
+  ];
+  const map={paid:['sent','Paid'],unpaid:['skip','Unpaid'],draft:['dupe','Draft']};
+  $('#invVendorBody').innerHTML = weeks.map(([wk,b,st])=>{
+    const [cls,lab]=map[st], amt=Math.round(b*blend);
+    const dl = st==='draft' ? '' : `<button class="btn" style="padding:5px 10px" onclick="toast('Invoice ${wk} · PDF + CSV downloaded (mock)')">Download</button>`;
+    return `<tr><td class="l mono">${wk}</td><td class="num">${b}</td><td class="val-amber">${money(amt)}</td><td><span class="st ${cls}">${lab}</span></td><td>${dl}</td></tr>`;
+  }).join('');
+}
+
+// team: vendor-issued sub-vendor logins
+function renderTeam(){
+  const vs=visibleVendors();
+  let rows='';
+  vs.forEach((v,vi)=>v.subs.forEach((s,si)=>{
+    const st=s.login.status;
+    const chip = st==='active'?'<span class="st sent">Active</span>'
+               : st==='invited'?'<span class="st skip">Invited</span>'
+               : '<span class="st dupe">No login</span>';
+    const emailCell = st==='none'
+      ? `<input id="te-${vi}-${si}" placeholder="email@subvendor.com" style="width:180px;padding:6px 9px;font-size:12px;border:1px solid var(--line2);border-radius:7px;background:#fff;color:var(--ink);font-family:var(--body)">`
+      : `<span class="mono" style="font-size:12px">${s.login.email}</span>`;
+    const action = st==='active'
+      ? `<button class="btn" style="padding:5px 10px" onclick="toast('Reset link sent to ${s.login.email}')">Reset</button>`
+      : `<button class="btn primary" style="padding:5px 10px" onclick="invite(${vi},${si})">${st==='invited'?'Resend':'Invite'} →</button>`;
+    rows+=`<tr><td class="l" style="font-weight:600">${s.name}</td><td class="l"><span class="pub mono">${s.pub}</span></td><td class="l">${emailCell}</td><td>${chip}</td><td>${action}</td></tr>`;
+  }));
+  $('#teamBody').innerHTML=rows;
+}
+function invite(vi,si){
+  const s=visibleVendors()[vi].subs[si];
+  const inp=document.getElementById(`te-${vi}-${si}`);
+  const email=(inp&&inp.value.trim()) || s.login.email || `team@${s.pub}.com`;
+  s.login.email=email; s.login.status='active';
+  renderTeam();
+  toast(`Login created for ${s.pub} → ${email}`);
+}
+
+// role → which tabs are visible
+function applyRoleTabs(){
+  const vis={admin:['dash','inv','admin','health'], manager:['dash','inv','team'], sub:['dash','inv']};
+  document.querySelectorAll('#tabs button').forEach(b=>{ b.style.display = vis[S.role].includes(b.dataset.v)?'':'none'; });
+  const adminLens = S.role==='admin';
+  $('#lensSeg').style.display = adminLens?'':'none';
+}
+
+function toggleV(i){
+  const open = document.querySelector(`.vrow[data-g="${i}"]`).classList.toggle('open');
+  document.querySelectorAll(`.srow[data-g="${i}"]`).forEach(r=>r.style.display=open?'':'none');
+}
+
+function renderInvoices(){
+  const m=S.method;
+  // invoice list (always TRUE→adjusted billed, vendor-facing amounts)
+  let body='';
+  VENDORS.forEach((v,i)=>{
+    let a=0; v.subs.forEach(s=>a+=adj(s[m],v.scrub));
+    const amt=a*v.rate, st = i===2?'sent':(i===1?'locked':'draft');
+    body+=`<tr><td class="l" style="font-family:var(--disp);font-weight:700">${v.name}<div style="font-family:var(--body);font-weight:400;color:var(--dim);font-size:11px">${v.subs.map(s=>s.pub).join(' · ')}</div></td>
+      <td class="num">${v.subs.length}</td><td class="val-amber">${a}</td><td class="val-amber">${money(amt)}</td>
+      <td><span class="st ${st}">${st}</span></td></tr>`;
+  });
+  $('#invBody').innerHTML=body;
+
+  // LivMed scenario matrix
+  const lv=VENDORS[0];
+  const tf=lv.subs.reduce((x,s)=>x+s.fifo,0), tl=lv.subs.reduce((x,s)=>x+s.lifo,0);
+  const af=lv.subs.reduce((x,s)=>x+adj(s.fifo,lv.scrub),0), al=lv.subs.reduce((x,s)=>x+adj(s.lifo,lv.scrub),0);
+  const cells=[
+    ['FIFO · scrub off',tf,tf*lv.rate,false],
+    ['FIFO · scrub on', af,af*lv.rate, m==='fifo'],
+    ['LIFO · scrub off',tl,tl*lv.rate,false],
+    ['LIFO · scrub on', al,al*lv.rate, m==='lifo'],
+  ];
+  $('#scen').innerHTML = cells.map(([lab,c,amt,best])=>`
+    <div class="cell ${best?'best':''}">${best?'<span class="star">● issuing</span>':''}
+      <div class="lab">${lab}</div><div class="c num">${c}</div><div class="d">${money(amt)}</div></div>`).join('');
+}
+
+// admin tables
+function renderAdmin(){
+  $('#adminVendors').innerHTML = VENDORS.map(v=>`<tr>
+    <td class="l" style="font-weight:600">${v.name} <span class="chip">${v.key}</span></td>
+    <td class="num">${v.subs.length}</td><td class="val-amber">${money(v.rate)}</td>
+    <td><span class="chip scrub">${(v.scrub*100).toFixed(0)}%</span></td></tr>`).join('');
+  $('#unknownQ').innerHTML = UNKNOWN.map(u=>`<tr>
+    <td class="l did" style="color:var(--ink)">${u.did}</td><td class="num">${u.calls}</td>
+    <td class="mono" style="color:var(--mut)">${u.seen}</td>
+    <td><button class="assign" onclick="openAssign('${u.did}',${u.calls})">Assign →</button></td></tr>`).join('');
+  if(!UNKNOWN.length) $('#unknownQ').innerHTML = `<tr><td class="l" colspan="4" style="color:var(--green);font-family:var(--mono);font-size:12px">✓ queue clear — all DIDs resolved</td></tr>`;
+}
+
+// ---------- login ----------
+function doLogin(){ $('#login').classList.add('hide'); toast('Demo mode · sample data, no real auth'); }
+
+// ---------- data health ----------
+const RUNS=[
+  {t:'09:42:11', f:'inbound_2026-06-05_0930.csv',  rows:'412',        st:'ok'},
+  {t:'09:42:09', f:'outbound_2026-06-05_0930.csv', rows:'388',        st:'ok'},
+  {t:'09:27:10', f:'inbound_2026-06-05_0915.csv',  rows:'401',        st:'ok'},
+  {t:'09:27:08', f:'outbound_2026-06-05_0915.csv', rows:'377 · 41 dup', st:'dupe'},
+  {t:'09:12:06', f:'inbound_2026-06-05_0900.csv',  rows:'—',          st:'skip'},
+];
+const BUCKETS=[ {b:'gh360-ecp-…-us-east-1-an', r:'us-east-1', last:'2 min ago'} ];
+function renderHealth(){
+  $('#hstats').innerHTML = [
+    {ey:'Worker',        v:'<span class="pulse"></span>healthy', sub:'node-cron · 15 min'},
+    {ey:'Files today',   v:'18',                                 sub:'inbound + outbound'},
+    {ey:'Rows ingested', v:INGESTED.toLocaleString(),            sub:'deduped by callID'},
+    {ey:'Unknown DIDs',  v:'<span style="color:var(--amber)">'+UNKNOWN.length+'</span>', sub:UNKNOWN.reduce((a,u)=>a+u.calls,0)+' calls excluded'},
+    {ey:'Malformed',     v:'3',                                  sub:'skipped · non-fatal'},
+  ].map(h=>`<div class="hstat"><div class="ey">${h.ey}</div><div class="v num">${h.v}</div><div class="sub">${h.sub}</div></div>`).join('');
+  $('#runsBody').innerHTML = RUNS.map(r=>`<tr>
+    <td class="l mono" style="color:var(--mut)">${r.t}</td>
+    <td class="l"><span class="fname">${r.f}</span></td>
+    <td class="num">${r.rows}</td>
+    <td><span class="st ${r.st}">${r.st==='ok'?'ingested':r.st==='dupe'?'merged dupes':'already processed'}</span></td></tr>`).join('');
+  $('#bucketsBody').innerHTML = BUCKETS.map(b=>`<tr>
+    <td class="l mono" style="color:var(--ink)">${b.b}</td>
+    <td class="mono" style="color:var(--mut)">${b.r}</td>
+    <td class="mono" style="color:var(--mut)">${b.last}</td></tr>`).join('');
+}
+
+// ---------- unknown-DID assign flow ----------
+let amCur=null;
+function openAssign(did,calls){
+  amCur={did,calls};
+  $('#amDid').value=did;
+  $('#amVendor').innerHTML=VENDORS.map((v,i)=>`<option value="${i}">${v.name} · ${v.key}</option>`).join('');
+  $('#amPub').value='';
+  amPreview();
+  $('#assignModal').classList.add('show');
+}
+function amPreview(){
+  if(!amCur) return;
+  const v=VENDORS[+$('#amVendor').value];
+  const pub=$('#amPub').value.trim()||'&lt;new-pubid&gt;';
+  $('#amBf').innerHTML=`Creates sub-vendor <b>${pub}</b> under <b>${v.name}</b> and back-fills <b>${amCur.calls} calls</b> on DID <b>${amCur.did}</b>.<br><span style="color:var(--dim)">One-time initial assignment · DID 1:1 pubID · not reassignable later.</span>`;
+}
+function closeAssign(){ $('#assignModal').classList.remove('show'); amCur=null; }
+function applyAssign(){
+  if(!amCur) return;
+  const v=VENDORS[+$('#amVendor').value];
+  const pub=$('#amPub').value.trim()||('inbound-'+amCur.did.slice(-4));
+  const did=amCur.did, calls=amCur.calls;
+  const i=UNKNOWN.findIndex(u=>u.did===did); if(i>-1) UNKNOWN.splice(i,1);
+  closeAssign(); renderAdmin(); renderHealth();
+  toast(`Assigned ${did} → ${v.key}/${pub} · back-filled ${calls} calls`);
+}
+
+// ---------- nav / controls ----------
+function setView(v){
+  S.view=v;
+  document.querySelectorAll('.view').forEach(x=>x.classList.remove('on'));
+  $('#v-'+v).classList.add('on');
+  document.querySelectorAll('#tabs button').forEach(b=>b.classList.toggle('on',b.dataset.v===v));
+  if(v==='health') renderHealth();
+  if(v==='team') renderTeam();
+  if(v==='inv') updateInvoiceMode();
+}
+document.querySelectorAll('#tabs button').forEach(b=>b.onclick=()=>setView(b.dataset.v));
+$('#role').onchange = e=>{
+  S.role=e.target.value;
+  if(S.role!=='admin') S.lens='adj';
+  applyRoleTabs();
+  setView('dash');
+  render(); renderTeam();
+  toast(S.role==='admin' ? 'Viewing as Admin — TRUE lens available'
+      : S.role==='manager' ? 'Viewing as Vendor (LivMed) — scoped, adjusted only'
+      : 'Viewing as Sub-vendor (RedPeak A) — own data only');
+};
+$('#lensSeg').querySelectorAll('button').forEach(b=>b.onclick=()=>{
+  if(S.role!=='admin') return;
+  S.lens=b.dataset.lens;
+  $('#lensSeg').querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b));
+  render();
+});
+$('#methodSeg').querySelectorAll('button').forEach(b=>b.onclick=()=>{
+  S.method=b.dataset.m;
+  $('#methodSeg').querySelectorAll('button').forEach(x=>x.classList.toggle('on',x===b));
+  render();
+  toast(`Keeper method → ${S.method.toUpperCase()}`);
+});
+
+function enterApp(){ $('#portal').classList.add('hide'); $('#app').classList.add('show'); applyRoleTabs(); render(); renderAdmin(); renderHealth(); renderTeam(); }
+function goPortal(){ $('#app').classList.remove('show'); $('#portal').classList.remove('hide'); }
+
+let tT;
+function toast(msg){
+  const t=$('#toast'); t.innerHTML=`<span class="k">›</span> ${msg}`;
+  t.classList.add('show'); clearTimeout(tT); tT=setTimeout(()=>t.classList.remove('show'),2600);
+}
+</script>
+</body>
+</html>
