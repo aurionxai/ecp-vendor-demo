@@ -201,21 +201,25 @@
     <!-- INVOICES -->
     <section class="view" id="v-inv">
       <div id="invAdmin">
+        <div class="kpis" id="apKpis"></div>
+        <div style="display:flex;gap:10px;align-items:center;margin-bottom:12px;flex-wrap:wrap">
+          <select id="apVendor" class="adminEdit"><option value="">Vendor: all</option></select>
+          <select id="apStatus" class="adminEdit"><option value="">AP: any</option><option>unpaid</option><option>paid</option><option>paid-direct</option><option>disputed</option></select>
+          <button class="btn primary sm" onclick="sendQB('all')">⇪ Send all unpaid → QuickBooks</button>
+          <span class="muted" id="apCount" style="font-size:12px"></span>
+        </div>
+        <div id="apLedger"></div>
+        <h2>Generate &amp; lock — current week <span class="tag" id="scenMethod">FIFO</span></h2>
         <div class="grid2">
+          <div class="scen" id="scen"></div>
           <div>
-            <h2>Draft invoices · this week</h2>
-            <div id="invBody"></div>
-          </div>
-          <div>
-            <h2>LivMed · scenario review <span class="tag" id="scenMethod">FIFO</span></h2>
-            <div class="scen" id="scen"></div>
-            <div style="display:flex;gap:9px;margin-top:12px">
-              <button class="btn primary" onclick="toast('Invoice LOCKED — snapshot + BilledLead written')">Finalize &amp; lock</button>
-              <button class="btn" onclick="toast('Keeper method → ' + (S.method==='fifo'?'LIFO':'FIFO'))" id="methToggle">Try LIFO</button>
+            <div style="display:flex;gap:9px">
+              <button class="btn primary" onclick="lockWeek()">Finalize &amp; lock week</button>
+              <button class="btn" id="methToggle">Try LIFO</button>
             </div>
+            <div class="note" style="margin-top:12px">Lock writes an <b>immutable snapshot</b> + billed consumers to <b>BilledLead</b> in one transaction. <b>Disputes are resolved before lock</b> (here, in this review) — once locked we go forward. Keeper FIFO by default; LIFO/kd-2 rules selectable. Invoices push to <b>QuickBooks</b> (QB integration / Claude MCP) for sending &amp; payment tracking.</div>
           </div>
         </div>
-        <div class="note">Lock writes an <b>immutable snapshot</b> + the billed consumers to the permanent <b>BilledLead</b> ledger in one transaction. Keeper is <b>FIFO (first billable instance)</b> by default; LIFO &amp; kd-2-style rules are selectable. Unknown-DID calls don't block the lock.</div>
       </div>
       <div id="invVendor" style="display:none">
         <h2>Owed &amp; paid</h2>
@@ -316,6 +320,15 @@ const VENDORS = [
 ];
 const UNKNOWN = [{did:'3105560148', calls:34, seen:'May 28'},{did:'4694412290', calls:12, seen:'May 30'}];
 const INGESTED=10210, QUALIFIED=951;
+// AP ledger — one invoice per vendor per week, with a payables status (kd2-style)
+const WEEKS=['Jun 1 – Jun 7','May 25 – May 31','May 18 – May 24','May 11 – May 17','May 4 – May 10'];
+const INVOICES=[];
+VENDORS.forEach(v=>{ const base=v.subs.reduce((a,s)=>a+adj(s.fifo,v.scrub)*v.rate,0);
+  WEEKS.forEach((w,wi)=>{ const amt=Math.round(base*(1+((wi*13)%7-3)/100));
+    const status = wi===0 ? 'unpaid' : (wi===1 ? (v.key==='COASTAL'?'disputed':'unpaid') : (wi===2&&v.key==='REDPEAK'?'paid-direct':'paid'));
+    INVOICES.push({vendor:v.key, vname:v.name, week:w, wi, amount:amt, status});
+  });
+});
 let S = {role:'admin', lens:'true', method:'fifo', subPub:'redpeak-a'};
 const RANGE={factor:1,label:'Jun 1 – Jun 7, 2026'};
 const PRESETS={
@@ -434,18 +447,7 @@ function renderInvoices(){
   const admin=S.role==='admin';
   $('#invAdmin').style.display=admin?'':'none'; $('#invVendor').style.display=admin?'none':'';
   if(admin){
-    let h='<table><thead><tr><th>Vendor</th><th>Subs</th><th>Billable</th><th>Amount</th><th>Status</th></tr></thead><tbody>';
-    VENDORS.forEach((v,i)=>{ const a=agg([v]); const st=i===2?['green','Paid']:i===1?['blue','Locked']:['amber','Draft'];
-      h+=`<tr><td class="v"><a onclick="drillVendor(${i})">${v.name}</a></td><td class="num">${v.subs.length}</td><td class="num">${a.net}</td><td class="num"><b>${money(a.arN)}</b></td><td><span class="pill ${st[0]}">${st[1]}</span></td></tr>`;
-    });
-    $('#invBody').innerHTML=h+'</tbody></table>';
-    const lv=VENDORS[0];
-    const tf=lv.subs.reduce((x,s)=>x+s.fifo,0), tl=lv.subs.reduce((x,s)=>x+s.lifo,0);
-    const af=lv.subs.reduce((x,s)=>x+adj(s.fifo,lv.scrub),0), al=lv.subs.reduce((x,s)=>x+adj(s.lifo,lv.scrub),0);
-    const cells=[['FIFO · scrub off',tf,tf*lv.rate,false],['FIFO · scrub on',af,af*lv.rate,S.method==='fifo'],
-                 ['LIFO · scrub off',tl,tl*lv.rate,false],['LIFO · scrub on',al,al*lv.rate,S.method==='lifo']];
-    $('#scen').innerHTML=cells.map(([l,c,a,best])=>`<div class="c${best?' best':''}"><div class="lab">${l}${best?' · issuing':''}</div><div class="big num">${c}</div><div class="sm">${money(a)}</div></div>`).join('');
-    $('#scenMethod').textContent=S.method.toUpperCase();
+    renderAP(); renderScenario();
   } else {
     const v=scope()[0];
     let owed=0, subH='<table><thead><tr><th>Sub-vendor</th><th>DID#</th><th>Billable</th><th>Amount</th></tr></thead><tbody>';
@@ -465,6 +467,40 @@ function renderInvoices(){
     $('#invVendorKpis').innerHTML = card('Owed (outstanding)', money(out), 'incl. current week', true, true) + card('Paid · last 90d', money(paid), '', false, true);
   }
 }
+function renderScenario(){
+  const lv=VENDORS[0];
+  const tf=lv.subs.reduce((x,s)=>x+s.fifo,0), tl=lv.subs.reduce((x,s)=>x+s.lifo,0);
+  const af=lv.subs.reduce((x,s)=>x+adj(s.fifo,lv.scrub),0), al=lv.subs.reduce((x,s)=>x+adj(s.lifo,lv.scrub),0);
+  const cells=[['FIFO · scrub off',tf,tf*lv.rate,false],['FIFO · scrub on',af,af*lv.rate,S.method==='fifo'],
+               ['LIFO · scrub off',tl,tl*lv.rate,false],['LIFO · scrub on',al,al*lv.rate,S.method==='lifo']];
+  $('#scen').innerHTML=cells.map(([l,c,a,best])=>`<div class="c${best?' best':''}"><div class="lab">${l}${best?' · issuing':''}</div><div class="big num">${c}</div><div class="sm">${money(a)}</div></div>`).join('');
+  $('#scenMethod').textContent=S.method.toUpperCase();
+}
+function renderAP(){
+  if($('#apVendor').options.length===1) VENDORS.forEach(v=>{ const o=document.createElement('option'); o.value=v.key; o.textContent=v.name; $('#apVendor').appendChild(o); });
+  const vf=$('#apVendor').value, sf=$('#apStatus').value;
+  const rows=INVOICES.filter(r=>(!vf||r.vendor===vf)&&(!sf||r.status===sf));
+  const sumIf=f=>rows.filter(r=>f(r.status)).reduce((a,r)=>a+r.amount,0);
+  $('#apKpis').innerHTML = card('AP billed', money(rows.reduce((a,r)=>a+r.amount,0)))
+    + card('AP paid', money(sumIf(s=>s==='paid'||s==='paid-direct')),'',false,true)
+    + card('AP unpaid', money(sumIf(s=>s==='unpaid')),'',true,true)
+    + card('Disputed', money(sumIf(s=>s==='disputed')));
+  $('#apCount').textContent = `${rows.length} of ${INVOICES.length} invoices`;
+  let h='<table><thead><tr><th>Vendor</th><th>Week</th><th>Amount</th><th>AP status</th><th></th></tr></thead><tbody>';
+  rows.forEach(r=>{ const idx=INVOICES.indexOf(r);
+    h+=`<tr><td><b>${r.vname}</b></td><td>${r.week}${r.wi===0?' <span class="tag">current</span>':''}</td><td class="num"><b>${money(r.amount)}</b></td>`
+     +`<td><select class="adminEdit" onchange="setInvStatus(${idx},this.value)">`+['unpaid','paid','paid-direct','disputed'].map(s=>`<option ${s===r.status?'selected':''}>${s}</option>`).join('')+`</select></td>`
+     +`<td><button class="btn sm" onclick="sendQB(${idx})">Send → QB</button></td></tr>`;
+  });
+  if(!rows.length) h+='<tr><td colspan="5" class="muted" style="text-align:center;padding:20px">No matching invoices</td></tr>';
+  $('#apLedger').innerHTML=h+'</tbody></table>';
+}
+function setInvStatus(idx,st){ INVOICES[idx].status=st; renderAP(); toast(`${INVOICES[idx].vname} · ${INVOICES[idx].week} → ${st}`); }
+function sendQB(which){
+  if(which==='all'){ const n=INVOICES.filter(r=>r.status==='unpaid').length; toast(`${n} unpaid invoice(s) pushed to QuickBooks for sending`); }
+  else { const r=INVOICES[which]; toast(`${r.vname} · ${r.week} pushed to QuickBooks (sent for payment)`); }
+}
+function lockWeek(){ toast('Week locked — immutable snapshot + BilledLead written; pushed to QuickBooks'); }
 
 /* ---------- team ---------- */
 function renderTeam(){
@@ -567,6 +603,7 @@ function searchPhone(){
   openDrill('Phone '+fmtPhone(p)+' — lookup', (S.role==='admin'?'searched across all vendors':'searched within your own data')+' · 1 match', h);
 }
 $('#phsearch').addEventListener('keydown',e=>{ if(e.key==='Enter') searchPhone(); });
+$('#apVendor').onchange=renderAP; $('#apStatus').onchange=renderAP;
 
 // preview any sub-vendor's 1:1 scoped view (each sub has a unique login + own-data-only view)
 function previewSub(pub){ S.role='sub'; S.subPub=pub; $('#role').value='sub'; applyRole(); setView('dash'); render(); toast('Previewing 1:1 view — '+pub+' sees only its own data'); }
