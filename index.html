@@ -271,6 +271,16 @@
       <div class="kpis" id="marginKpis"></div>
       <div class="cfg" id="clientCfg" style="margin-top:6px;margin-bottom:6px"></div>
       <div class="note" style="margin-top:0;margin-bottom:22px"><b>AR</b> = the client pays us per call <b>connected ≥120s</b> (no consumer dedup — every connected call is revenue). <b>AP</b> = we pay the vendor per <b>≥630s</b> deduped call. The gap (≥120s but not ≥630s, plus repeat/unattributed callers) is <b>in-house margin</b> — billed to the client, no vendor cost. Both thresholds are editable above.</div>
+
+      <h2>Margin Autopilot <span class="pill blue">recommend mode</span></h2>
+      <div style="display:flex;gap:12px;align-items:center;margin-bottom:10px;flex-wrap:wrap">
+        <span class="muted" style="font-size:13px">Target margin / vendor:</span>
+        <input id="apTarget" class="adminEdit num" type="number" value="30" onchange="renderAutopilot()" style="width:64px"> %
+        <span class="muted" style="font-size:12px">proposals only · you approve · applies to the <b>open week</b> · audit-logged</span>
+      </div>
+      <div id="autopilot"></div>
+      <div class="note" style="margin-bottom:22px">The loop itself is a <b>deterministic controller</b> (a thermostat) — this is its <b>recommend</b> stage. A <b>Claude-API copilot</b> would sit on top: ask "what scrub holds 35% on RedPeak?" in plain English and it proposes a change here for approval. Nothing auto-applies; scrub never touches a locked week.</div>
+
       <div class="grid2">
         <div>
           <h2>Vendors &amp; rates</h2>
@@ -325,19 +335,19 @@ const adj = (n,sc)=> Math.round(n*(1-sc));
 const pct = (x)=> (x*100).toFixed(1)+'%';
 
 const VENDORS = [
-  {name:'LivMed', key:'LIVMED', rate:250, scrub:.08, leakRate:.10, pool:['8447120094','8447120118'], subs:[
+  {name:'LivMed', key:'LIVMED', rate:250, scrub:.08, leakRate:.10, conn:396, pool:['8447120094','8447120118'], subs:[
     {name:'LivMed — Daypart',  pub:'livmed-day',   did:'8447120033', total:1850, qual:224, fifo:210, lifo:213, login:{status:'active', email:'ops@livmed-day.com'}},
     {name:'LivMed — Overnight',pub:'livmed-night', did:'8447120061', total:1480, qual:170, fifo:162, lifo:160, login:{status:'none',   email:''}},
   ]},
-  {name:'RedPeak Media', key:'REDPEAK', rate:265, scrub:.05, leakRate:.08, pool:['2138840161'], subs:[
+  {name:'RedPeak Media', key:'REDPEAK', rate:265, scrub:.05, leakRate:.08, conn:392, pool:['2138840161'], subs:[
     {name:'RedPeak A', pub:'redpeak-a', did:'2138840097', total:1320, qual:126, fifo:120, lifo:121, login:{status:'active',  email:'a@redpeak.com'}},
     {name:'RedPeak B', pub:'redpeak-b', did:'2138840102', total:1280, qual:124, fifo:118, lifo:119, login:{status:'invited', email:'b@redpeak.com'}},
     {name:'RedPeak C', pub:'redpeak-c', did:'2138840145', total:920,  qual:84,  fifo:80,  lifo:79,  login:{status:'none',    email:''}},
   ]},
-  {name:'Coastal Connect', key:'COASTAL', rate:240, scrub:.12, leakRate:.22, pool:[], subs:[
+  {name:'Coastal Connect', key:'COASTAL', rate:240, scrub:.12, leakRate:.22, conn:182, pool:[], subs:[
     {name:'Coastal Prime', pub:'coastal-a', did:'7274451180', total:2010, qual:223, fifo:219, lifo:223, login:{status:'active', email:'team@coastalconnect.io'}},
   ]},
-  {name:'Go Health 360, Inc', key:'GOHEALTH', rate:235, scrub:.00, leakRate:.03, inhouse:true, pool:[], subs:[
+  {name:'Go Health 360, Inc', key:'GOHEALTH', rate:235, scrub:.00, leakRate:.03, conn:163, inhouse:true, pool:[], subs:[
     {name:'GoHealth — Outbound', pub:'gh360-out', did:'3174019409', total:1240, qual:140, fifo:131, lifo:133, login:{status:'active', email:'billing@gohealth360.com'}},
   ]},
 ];
@@ -434,11 +444,11 @@ function card(label,n,sub,accent,money){
 function pcard(l,n,s,cls){ return `<div class="pcard2 ${cls}"><div class="l2">${l}</div><div class="n2">${n}</div><div class="s2">${s}</div></div>`; }
 function renderPnl(sc){
   const arRate=CONFIG.arRateCents/100;
-  let apCost=0, wasted=0, wastedCalls=0, worst={name:'',amt:0};
-  VENDORS.forEach(v=>{ const a=agg([v]); apCost+=a.arN;
+  let apCost=0, wasted=0, wastedCalls=0, worst={name:'',amt:0}, arAttr=0;
+  VENDORS.forEach(v=>{ const a=agg([v]); apCost+=a.arN; arAttr+=(v.conn||0)*arRate;
     const wc=Math.round(a.net*(v.leakRate||0)), w=wc*v.rate;
     wasted+=w; wastedCalls+=wc; if(w>worst.amt) worst={name:v.name,amt:w}; });
-  const arRev=(CONFIG.arCallsAttributed+CONFIG.arCallsInhouse)*arRate;
+  const arRev=arAttr + CONFIG.arCallsInhouse*arRate;
   const P=arRev-apCost, good=P>=0;
   $('#pnl').innerHTML =
      pcard('Client paid us', money(sc(arRev)), 'Exact Care Pharmacy · AR', 'good')
@@ -612,13 +622,39 @@ function renderAdmin(){
     UNKNOWN.forEach((x,i)=>u+=`<tr><td class="mono">${x.did}</td><td class="num">${x.calls}</td><td>${x.seen}</td><td><button class="btn primary sm" onclick="assignUnknown(${i})">Assign →</button></td></tr>`);
     $('#unknownQ').innerHTML=u+'</tbody></table>';
   } else $('#unknownQ').innerHTML='<div class="note" style="margin-top:0;color:var(--green)">✓ Queue clear — all DIDs resolved</div>';
-  renderMargin();
+  renderMargin(); renderAutopilot();
+}
+function renderAutopilot(){
+  const tEl=$('#apTarget'); if(!tEl) return;
+  const target=Math.max(0,Math.min(0.9,(parseFloat(tEl.value)||30)/100));
+  const arRate=CONFIG.arRateCents/100;
+  let h='<table><thead><tr><th>Vendor</th><th>We pay (AP)</th><th>Margin now</th><th>Target</th><th>Recommendation</th><th></th></tr></thead><tbody>';
+  VENDORS.forEach((v,i)=>{
+    const ap=agg([v]).arN, ar=(v.conn||0)*arRate, margin = ar>0 ? (ar-ap)/ar : 0;
+    let rec, action;
+    if(target-margin>0.01){
+      const proposed=Math.min(0.35, v.scrub + (target-margin));
+      rec=`<span style="color:var(--red)">▲ scrub ${(v.scrub*100).toFixed(0)}% → <b>${(proposed*100).toFixed(0)}%</b></span> <span class="muted">→ ~${(target*100).toFixed(0)}% margin</span>`;
+      action=`<button class="btn primary sm" onclick="applyAutopilot(${i},${proposed.toFixed(3)})">Approve →</button>`;
+    } else { rec='<span style="color:var(--green)">✓ on target</span>'; action='<span class="muted">—</span>'; }
+    h+=`<tr><td><b>${v.name}</b>${v.inhouse?' <span class="pill blue">in-house</span>':''}</td><td class="num">${money(ap)}</td>`
+     +`<td class="num" style="${margin<target?'color:var(--red);font-weight:700':'color:var(--green);font-weight:600'}">${(margin*100).toFixed(0)}%</td>`
+     +`<td class="num">${(target*100).toFixed(0)}%</td><td>${rec}</td><td>${action}</td></tr>`;
+  });
+  $('#autopilot').innerHTML=h+'</tbody></table>';
+}
+function applyAutopilot(i,proposed){
+  const v=VENDORS[i], old=(v.scrub*100).toFixed(0);
+  v.scrub=parseFloat(proposed);
+  renderAdmin(); render();
+  toast(`${v.name} scrub ${old}% → ${(v.scrub*100).toFixed(0)}% approved · open week only · logged`);
 }
 function renderMargin(){
   const arRate=CONFIG.arRateCents/100;
-  const arCalls=CONFIG.arCallsAttributed+CONFIG.arCallsInhouse;
-  const arRev=arCalls*arRate, inhouse=CONFIG.arCallsInhouse*arRate;
-  let apCost=0; VENDORS.forEach(v=>{ apCost += agg([v]).arN; });
+  let arAttr=0, apCost=0; VENDORS.forEach(v=>{ arAttr+=(v.conn||0)*arRate; apCost+=agg([v]).arN; });
+  const inhouse=CONFIG.arCallsInhouse*arRate;
+  const arRev=arAttr+inhouse;
+  const arCalls=VENDORS.reduce((a,v)=>a+(v.conn||0),0)+CONFIG.arCallsInhouse;
   const margin=arRev-apCost;
   $('#marginKpis').innerHTML = card('AR revenue · '+CONFIG.client, money(arRev), `${arCalls} connected ≥${CONFIG.arSec}s`)
     + card('AP cost · vendors', money(apCost), 'what we pay vendors')
