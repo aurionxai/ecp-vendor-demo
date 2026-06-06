@@ -64,6 +64,19 @@
   .kpi .n{font-size:27px;font-weight:700} .kpi .n.money{color:var(--blue)}
   .kpi .l{font-size:12px;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;margin-top:3px}
   .kpi.accent{border-color:#c7d2fe;background:#fbfcff}
+  /* caveman P&L */
+  .pnl{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:14px}
+  @media(max-width:860px){.pnl{grid-template-columns:1fr 1fr}}
+  .pcard2{border:2px solid var(--line);border-radius:16px;padding:20px 22px;background:#fff}
+  .pcard2 .l2{font-size:13px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+  .pcard2 .n2{font-size:40px;font-weight:800;margin-top:8px;line-height:1;letter-spacing:-.02em}
+  .pcard2 .s2{font-size:12.5px;color:var(--muted);margin-top:9px}
+  .pcard2.good{border-color:#bbe6c8;background:#f0fdf4} .pcard2.good .n2{color:var(--green)}
+  .pcard2.bad{border-color:#f6c9c4;background:#fef2f2}  .pcard2.bad .n2{color:var(--red)}
+  .callout{border-radius:16px;padding:18px 22px;margin-bottom:20px;font-size:17px;line-height:1.5;font-weight:600;background:#fef2f2;border:2px solid #f6c9c4;color:#7f1d1d}
+  .callout.green{background:#f0fdf4;border-color:#bbe6c8;color:#14532d}
+  .callout .huge{font-size:30px;font-weight:800;display:block;margin:2px 0}
+  .callout b{font-weight:800}
 
   table{width:100%;border-collapse:collapse;background:#fff;border:1px solid var(--line);border-radius:12px;overflow:hidden;font-size:13px}
   th,td{padding:10px 13px;text-align:right;border-bottom:1px solid #f1f5f9}
@@ -192,6 +205,8 @@
   <main>
     <!-- DASHBOARD -->
     <section class="view on" id="v-dash">
+      <div id="callout"></div>
+      <div class="pnl" id="pnl" style="display:none"></div>
       <div class="kpis" id="kpis"></div>
       <h2 id="tblTitle">Vendor leaderboard</h2>
       <div id="mainTable"></div>
@@ -310,17 +325,20 @@ const adj = (n,sc)=> Math.round(n*(1-sc));
 const pct = (x)=> (x*100).toFixed(1)+'%';
 
 const VENDORS = [
-  {name:'LivMed', key:'LIVMED', rate:250, scrub:.08, pool:['8447120094','8447120118'], subs:[
+  {name:'LivMed', key:'LIVMED', rate:250, scrub:.08, leakRate:.10, pool:['8447120094','8447120118'], subs:[
     {name:'LivMed — Daypart',  pub:'livmed-day',   did:'8447120033', total:1850, qual:224, fifo:210, lifo:213, login:{status:'active', email:'ops@livmed-day.com'}},
     {name:'LivMed — Overnight',pub:'livmed-night', did:'8447120061', total:1480, qual:170, fifo:162, lifo:160, login:{status:'none',   email:''}},
   ]},
-  {name:'RedPeak Media', key:'REDPEAK', rate:265, scrub:.05, pool:['2138840161'], subs:[
+  {name:'RedPeak Media', key:'REDPEAK', rate:265, scrub:.05, leakRate:.08, pool:['2138840161'], subs:[
     {name:'RedPeak A', pub:'redpeak-a', did:'2138840097', total:1320, qual:126, fifo:120, lifo:121, login:{status:'active',  email:'a@redpeak.com'}},
     {name:'RedPeak B', pub:'redpeak-b', did:'2138840102', total:1280, qual:124, fifo:118, lifo:119, login:{status:'invited', email:'b@redpeak.com'}},
     {name:'RedPeak C', pub:'redpeak-c', did:'2138840145', total:920,  qual:84,  fifo:80,  lifo:79,  login:{status:'none',    email:''}},
   ]},
-  {name:'Coastal Connect', key:'COASTAL', rate:240, scrub:.12, pool:[], subs:[
+  {name:'Coastal Connect', key:'COASTAL', rate:240, scrub:.12, leakRate:.22, pool:[], subs:[
     {name:'Coastal Prime', pub:'coastal-a', did:'7274451180', total:2010, qual:223, fifo:219, lifo:223, login:{status:'active', email:'team@coastalconnect.io'}},
+  ]},
+  {name:'Go Health 360, Inc', key:'GOHEALTH', rate:235, scrub:.00, leakRate:.03, inhouse:true, pool:[], subs:[
+    {name:'GoHealth — Outbound', pub:'gh360-out', did:'3174019409', total:1240, qual:140, fifo:131, lifo:133, login:{status:'active', email:'billing@gohealth360.com'}},
   ]},
 ];
 const UNKNOWN = [{did:'3105560148', calls:34, seen:'May 28'},{did:'4694412290', calls:12, seen:'May 30'}];
@@ -371,12 +389,12 @@ function render(){
 
   // KPIs
   if(admin){
-    const bill = showAdj?A.net:A.gross, ar = showAdj?A.arN:A.arG;
-    $('#kpis').innerHTML = card('Gross calls', sc(INGESTED).toLocaleString())
-      + card('Qualified ≥630s', sc(QUALIFIED).toLocaleString(), pct(QUALIFIED/INGESTED)+' of gross')
-      + card('Billable '+(showAdj?'(net)':'(gross)'), sc(bill).toLocaleString(), showAdj?'≥630s':`${S.method.toUpperCase()} keeper`, true)
-      + card('AR', money(sc(ar)), `${sc(bill)} × rate`, true, true);
+    // P&L hero — caveman-simple, date-range aware
+    $('#kpis').style.display='none'; $('#kpis').innerHTML='';
+    $('#pnl').style.display=''; renderPnl(sc);
   } else {
+    $('#pnl').style.display='none'; $('#pnl').innerHTML=''; $('#callout').innerHTML='';
+    $('#kpis').style.display='';
     // VENDOR-FACING — gross calls, billable (≥630s), gross payout. Scrub is never shown.
     $('#kpis').innerHTML = card('Gross calls', sc(A.calls).toLocaleString())
       + card('Billable calls', sc(A.net).toLocaleString(), '≥630s talk time')
@@ -387,13 +405,14 @@ function render(){
   if(admin){
     $('#tblTitle').textContent='Vendor leaderboard';
     let h='<table><thead><tr><th>Vendor</th><th>Gross calls</th><th>Qualified</th><th>Qual %</th><th>Billable</th>'
-      +(showAdj?'':'<th>Scrub</th>')+'<th>Rate</th><th>AR</th></tr></thead><tbody>';
+      +(showAdj?'':'<th>Scrub</th>')+'<th>Rate</th><th>We pay</th><th>Wasted</th></tr></thead><tbody>';
     vs.forEach((v,vi)=>{ const a=agg([v]); const bill=showAdj?a.net:a.gross, ar=showAdj?a.arN:a.arG;
-      h+=`<tr class="clk" onclick="drillVendor(${vi})"><td class="v"><a>${v.name}</a> <span class="tag">${v.subs.length} sub${v.subs.length>1?'s':''}</span></td>`
+      const wc=Math.round(a.net*(v.leakRate||0)), w=wc*v.rate;
+      h+=`<tr class="clk" onclick="drillVendor(${vi})"><td class="v"><a>${v.name}</a> <span class="tag">${v.subs.length} sub${v.subs.length>1?'s':''}</span>${v.inhouse?' <span class="pill blue">in-house</span>':''}</td>`
        +`<td class="num">${sc(a.calls).toLocaleString()}</td><td class="num">${sc(a.qual)}</td><td class="pct num">${pct(a.qual/a.calls)}</td>`
        +`<td class="num">${sc(bill)}${showAdj?` <span class="muted" style="font-size:11px">/${sc(a.gross)}</span>`:''}</td>`
        +(showAdj?'':`<td class="num">${(v.scrub*100).toFixed(0)}%</td>`)
-       +`<td class="num">${money(v.rate)}</td><td class="num"><b>${money(sc(ar))}</b></td></tr>`;
+       +`<td class="num">${money(v.rate)}</td><td class="num"><b>${money(sc(ar))}</b></td><td class="num" style="color:var(--red);font-weight:700">${money(sc(w))}</td></tr>`;
     });
     $('#mainTable').innerHTML=h+'</tbody></table>';
   } else {
@@ -411,6 +430,23 @@ function render(){
 }
 function card(label,n,sub,accent,money){
   return `<div class="kpi${accent?' accent':''}"><div class="n${money?' money':''}">${n}</div><div class="l">${label}${sub?` · <span class="muted" style="text-transform:none;letter-spacing:0">${sub}</span>`:''}</div></div>`;
+}
+function pcard(l,n,s,cls){ return `<div class="pcard2 ${cls}"><div class="l2">${l}</div><div class="n2">${n}</div><div class="s2">${s}</div></div>`; }
+function renderPnl(sc){
+  const arRate=CONFIG.arRateCents/100;
+  let apCost=0, wasted=0, wastedCalls=0, worst={name:'',amt:0};
+  VENDORS.forEach(v=>{ const a=agg([v]); apCost+=a.arN;
+    const wc=Math.round(a.net*(v.leakRate||0)), w=wc*v.rate;
+    wasted+=w; wastedCalls+=wc; if(w>worst.amt) worst={name:v.name,amt:w}; });
+  const arRev=(CONFIG.arCallsAttributed+CONFIG.arCallsInhouse)*arRate;
+  const P=arRev-apCost, good=P>=0;
+  $('#pnl').innerHTML =
+     pcard('Client paid us', money(sc(arRev)), 'Exact Care Pharmacy · AR', 'good')
+   + pcard('We paid vendors', money(sc(apCost)), `${VENDORS.length} vendors · AP`, '')
+   + pcard(good?'Profit':'LOSS', money(sc(P)), 'AR − AP', good?'good':'bad')
+   + pcard('Wasted on vendors', money(sc(wasted)), `${sc(wastedCalls)} long calls the client didn't pay for`, 'bad');
+  $('#callout').className='callout';
+  $('#callout').innerHTML = `You paid vendors for <b>${sc(wastedCalls)} long calls</b> Exact Care Pharmacy didn't buy.<span class="huge">${money(sc(wasted))} gone</span>Worst offender: <b>${worst.name}</b> (${money(sc(worst.amt))}). Fix: raise that vendor's scrub or the 630-second bar.`;
 }
 
 /* ---------- drilldowns (modal) ---------- */
