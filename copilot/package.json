@@ -1,0 +1,13 @@
+{
+  "name": "margin-copilot",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Claude-API copilot prototype for the Pharmacy Call Tracking Margin Autopilot (tool-use over a deterministic billing engine).",
+  "scripts": {
+    "start": "node margin-copilot.mjs"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.69.0"
+  }
+}
