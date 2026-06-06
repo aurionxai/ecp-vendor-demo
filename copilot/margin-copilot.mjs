@@ -1,23 +1,18 @@
 #!/usr/bin/env node
-// Fraud Autopilot — Claude-API copilot prototype (Pharmacy Call Tracking)
+// Fraud Autopilot — copilot prototype with a SWAPPABLE LLM backend.
 //
-// Fraud lives at the SUB-VENDOR grain (each sub-vendor = its own DID + duration
-// pattern). Scrub adjusts ONE-TO-ONE to each sub-vendor's fraud signal — never a
-// vendor-wide average. Claude (claude-opus-4-8) parses the question and calls a
-// DETERMINISTIC tool that runs the real per-sub math; the model never invents a
-// number. It only RECOMMENDS — a human approves, open week only, never a locked
-// invoice. (Margin is held by RATE, not scrub — scrub is fraud control only.)
+// Same deterministic per-sub-vendor engine + tools for both backends. The LLM is
+// only the natural-language interface; the money math is in the tools, so a small
+// LOCAL model is plenty here. Recommend-only — a human approves, open week only.
 //
-// Usage:
-//   export ANTHROPIC_API_KEY=sk-ant-...
-//   npm install
-//   node margin-copilot.mjs "is anyone padding call durations on RedPeak?"
-//   node margin-copilot.mjs            # default: triage every sub-vendor
-
-import Anthropic from "@anthropic-ai/sdk";
+//   Claude API (quality):   export ANTHROPIC_API_KEY=sk-ant-...
+//                           node margin-copilot.mjs "is anyone padding RedPeak?"
+//   Local Ollama (no cost): node margin-copilot.mjs --ollama "is anyone padding RedPeak?"
+//                           (or COPILOT_BACKEND=ollama ; OLLAMA_MODEL=qwen3.5 ; OLLAMA_URL=...)
+//
+// No tokens/API billing on the --ollama path — it hits your local Ollama server.
 
 // ── deterministic per-sub-vendor engine (mirrors the mockup) ──────────────────
-const round2 = (n) => +n.toFixed(2);
 const SUBS = {
   "livmed-day":  { vendor: "LivMed",            rate: 250, scrub: 0.08, fraud: 0.04, billable: 210 },
   "livmed-night":{ vendor: "LivMed",            rate: 250, scrub: 0.08, fraud: 0.12, billable: 162 },
@@ -41,57 +36,92 @@ function recommend(pub) {
 const listSubvendors = () =>
   PUBS.map((p) => ({ pub: p, vendor: SUBS[p].vendor, fraudPct: SUBS[p].fraud, currentScrubPct: SUBS[p].scrub }));
 
-// ── tools exposed to Claude ───────────────────────────────────────────────────
-const tools = [
-  {
-    name: "list_subvendors",
-    description: "List every sub-vendor with its fraud signal and current scrub. Call this first to triage — fraud and scrub are PER SUB-VENDOR, never per vendor.",
-    input_schema: { type: "object", properties: {}, required: [] },
-  },
-  {
-    name: "recommend_scrub",
-    description: "For one sub-vendor (by pubID), return the scrub the deterministic engine recommends — set ONE-TO-ONE to that sub-vendor's fraud signal. Honest sub-vendors get scrub LOWERED; padded ones get it RAISED. Recommend-only; a human approves; applies to the open week only.",
-    input_schema: { type: "object", properties: { pub: { type: "string", enum: PUBS } }, required: ["pub"] },
-  },
-];
 const runTool = (name, input) =>
   name === "list_subvendors" ? listSubvendors()
   : name === "recommend_scrub" ? recommend(input.pub)
   : { error: `unknown tool ${name}` };
+const logTool = (name, input, out) =>
+  console.error(`  · ${name}(${JSON.stringify(input)}) → ${JSON.stringify(out)}`);
+
+// ── neutral tool spec (converted per backend) ─────────────────────────────────
+const TOOLSPEC = [
+  { name: "list_subvendors",
+    description: "List every sub-vendor with its fraud signal and current scrub. Call first to triage — fraud and scrub are PER SUB-VENDOR, never per vendor.",
+    parameters: { type: "object", properties: {}, required: [] } },
+  { name: "recommend_scrub",
+    description: "For one sub-vendor (by pubID), return the scrub recommended ONE-TO-ONE to its fraud signal. Honest sub-vendors get scrub LOWERED; padded ones RAISED. Recommend-only; open week; human approves.",
+    parameters: { type: "object", properties: { pub: { type: "string", enum: PUBS } }, required: ["pub"] } },
+];
 
 const SYSTEM = `You are the Fraud Autopilot copilot for "Pharmacy Call Tracking".
-Vendors send call traffic through sub-vendors (pubIDs). Some sub-vendors pad call durations to push calls over the 630s billable bar so we overpay. Scrub is an admin-only duration haircut that drops padded calls below the bar.
+Vendors send traffic through sub-vendors (pubIDs). Some pad call durations to push calls over the 630s billable bar so we overpay. Scrub is an admin-only duration haircut that drops padded calls below the bar.
 
 Rules:
-- Fraud and scrub are PER SUB-VENDOR (pubID), never per vendor. Always reason at the sub-vendor grain.
-- Scrub adjusts ONE-TO-ONE to each sub-vendor's fraud signal — never a vendor-wide average. Honest sub-vendors (fraud < scrub) should have scrub LOWERED so we stop underpaying them; padded ones (fraud > scrub) should have it RAISED.
+- Fraud and scrub are PER SUB-VENDOR (pubID), never per vendor. Reason at the sub-vendor grain.
+- Scrub adjusts ONE-TO-ONE to each sub-vendor's fraud signal. Honest sub-vendors (fraud < scrub) → LOWER scrub (stop underpaying); padded ones (fraud > scrub) → RAISE.
 - ALWAYS get numbers from the tools. Never invent a fraud %, scrub %, or recommendation.
-- This is RECOMMEND-ONLY: you propose, a human approves, and changes apply to the OPEN WEEK only — never a locked invoice. Scrub is fraud control, NOT a margin lever.
-- Be concise. One line per affected sub-vendor: "pubID (Vendor) — scrub A% → B% [raise/lower]". End with a one-line caveat that a human must approve.`;
+- RECOMMEND-ONLY: you propose, a human approves, changes apply to the OPEN WEEK only. Scrub is fraud control, NOT a margin lever.
+- Be concise. One line per affected sub-vendor: "pubID (Vendor) — scrub A% → B% [raise/lower]". End with a one-line "a human must approve" caveat.`;
 
-// ── manual tool-use loop ──────────────────────────────────────────────────────
-const client = new Anthropic();
-const question = process.argv.slice(2).join(" ")
-  || "Triage every sub-vendor: who is padding durations, who is over-scrubbed, and what scrub do you recommend for each?";
+const DEFAULT_Q = "Triage every sub-vendor: who is padding durations, who is over-scrubbed, and what scrub do you recommend for each?";
 
-let messages = [{ role: "user", content: question }];
-while (true) {
-  const res = await client.messages.create({
-    model: "claude-opus-4-8", max_tokens: 16000, thinking: { type: "adaptive" },
-    system: SYSTEM, tools, messages,
-  });
-  if (res.stop_reason !== "tool_use") {
-    console.log("\n" + res.content.filter((b) => b.type === "text").map((b) => b.text).join("") + "\n");
-    break;
-  }
-  messages.push({ role: "assistant", content: res.content });
-  const results = [];
-  for (const b of res.content) {
-    if (b.type === "tool_use") {
-      const out = runTool(b.name, b.input);
-      console.error(`  · ${b.name}(${JSON.stringify(b.input)}) → ${JSON.stringify(out)}`);
+// ── backend: Claude API (official SDK) ────────────────────────────────────────
+async function runAnthropic(question) {
+  const { default: Anthropic } = await import("@anthropic-ai/sdk");
+  const client = new Anthropic();
+  const tools = TOOLSPEC.map((t) => ({ name: t.name, description: t.description, input_schema: t.parameters }));
+  let messages = [{ role: "user", content: question }];
+  while (true) {
+    const res = await client.messages.create({
+      model: "claude-opus-4-8", max_tokens: 16000, thinking: { type: "adaptive" },
+      system: SYSTEM, tools, messages,
+    });
+    if (res.stop_reason !== "tool_use")
+      return res.content.filter((b) => b.type === "text").map((b) => b.text).join("");
+    messages.push({ role: "assistant", content: res.content });
+    const results = [];
+    for (const b of res.content) if (b.type === "tool_use") {
+      const out = runTool(b.name, b.input); logTool(b.name, b.input, out);
       results.push({ type: "tool_result", tool_use_id: b.id, content: JSON.stringify(out) });
     }
+    messages.push({ role: "user", content: results });
   }
-  messages.push({ role: "user", content: results });
 }
+
+// ── backend: local Ollama (OpenAI-compatible /v1, no API key, no token cost) ──
+async function runOllama(question, model, url) {
+  const tools = TOOLSPEC.map((t) => ({ type: "function", function: { name: t.name, description: t.description, parameters: t.parameters } }));
+  let messages = [{ role: "system", content: SYSTEM }, { role: "user", content: question }];
+  for (let round = 0; round < 8; round++) {
+    const r = await fetch(`${url}/chat/completions`, {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model, messages, tools, tool_choice: "auto", stream: false }),
+    });
+    if (!r.ok) throw new Error(`Ollama ${r.status}: ${await r.text()}`);
+    const msg = (await r.json()).choices[0].message;
+    messages.push(msg);
+    if (msg.tool_calls?.length) {
+      for (const tc of msg.tool_calls) {
+        let args = {}; try { args = JSON.parse(tc.function.arguments || "{}"); } catch {}
+        const out = runTool(tc.function.name, args); logTool(tc.function.name, args, out);
+        messages.push({ role: "tool", tool_call_id: tc.id, content: JSON.stringify(out) });
+      }
+      continue;
+    }
+    return msg.content || "";
+  }
+  return "(stopped after max tool rounds)";
+}
+
+// ── main: pick backend ────────────────────────────────────────────────────────
+const argv = process.argv.slice(2);
+let backend = process.env.COPILOT_BACKEND || "anthropic";
+if (argv[0] === "--ollama" || argv[0] === "--local") { backend = "ollama"; argv.shift(); }
+if (argv[0] === "--anthropic" || argv[0] === "--claude") { backend = "anthropic"; argv.shift(); }
+const question = argv.join(" ") || DEFAULT_Q;
+const model = process.env.OLLAMA_MODEL || "qwen3.5";
+const url = (process.env.OLLAMA_URL || "http://localhost:11434/v1").replace(/\/$/, "");
+
+console.error(`[backend: ${backend === "ollama" ? `ollama · ${model} @ ${url} · no token cost` : "claude-opus-4-8 · Claude API"}]`);
+const out = backend === "ollama" ? await runOllama(question, model, url) : await runAnthropic(question);
+console.log("\n" + out + "\n");
