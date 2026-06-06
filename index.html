@@ -102,6 +102,9 @@
   .scen .c .lab{font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted)}
   .scen .c .big{font-size:20px;font-weight:700;margin-top:6px} .scen .c .sm{font-size:12px;color:var(--muted)}
   .teamemail{width:190px;padding:6px 9px;border:1px solid #cbd5e1;border-radius:7px;font-size:12.5px}
+  .flab{display:block;font-size:11px;color:var(--muted);margin-bottom:5px;text-transform:uppercase;letter-spacing:.04em}
+  .adminEdit{padding:6px 8px;border:1px solid #cbd5e1;border-radius:6px;font-size:13px;font-variant-numeric:tabular-nums}
+  .adminEdit:focus{outline:none;border-color:var(--blue);box-shadow:0 0 0 3px var(--blue2)}
   .drop{border:1.5px dashed #cbd5e1;border-radius:10px;padding:22px;text-align:center;color:var(--muted);font-size:13px}
   .drop b{color:var(--ink)}
 
@@ -203,17 +206,31 @@
         <div class="note">Lock writes an <b>immutable snapshot</b> + the billed consumers to the permanent <b>BilledLead</b> ledger in one transaction. Keeper is <b>FIFO (first billable instance)</b> by default; LIFO &amp; kd-2-style rules are selectable. Unknown-DID calls don't block the lock.</div>
       </div>
       <div id="invVendor" style="display:none">
-        <h2>Your invoices</h2>
-        <div id="invVendorBody"></div>
-        <div class="note">Amounts are <b>net of scrub</b> at your per-call rate. <b>Paid</b> has cleared · <b>Unpaid</b> is sent, awaiting payment · <b>Draft</b> is the current open week.</div>
+        <h2>Owed &amp; paid</h2>
+        <div class="kpis" id="invVendorKpis"></div>
+        <h2>This week · by sub-vendor</h2>
+        <div id="invVendorSubs"></div>
+        <h2>Invoice history</h2>
+        <div id="invVendorHist"></div>
+        <div class="note"><b>Owed</b> is sent &amp; awaiting payment · <b>Paid</b> has cleared · the current week stays <b>Draft</b> until locked. Amounts = billable calls × your per-call rate.</div>
       </div>
     </section>
 
-    <!-- TEAM -->
+    <!-- TEAM / sub-vendor management (vendor self-service) -->
     <section class="view" id="v-team">
-      <h2>Sub-vendor logins</h2>
+      <h2>Sub-vendors &amp; logins</h2>
       <div id="teamBody"></div>
-      <div class="note">Invite your sub-vendors — each login is <b>scoped to its own pubID</b> (its calls, qualified %, paid calls and invoices only). Switch the role selector to <b>Sub-vendor</b> to preview that view.</div>
+      <h2>Add a sub-vendor</h2>
+      <div class="cfg" style="padding:15px">
+        <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end">
+          <div><label class="flab">Name</label><input id="nsName" class="teamemail" placeholder="e.g. RedPeak D"></div>
+          <div><label class="flab">pubID</label><input id="nsPub" class="teamemail" placeholder="e.g. redpeak-d"></div>
+          <div><label class="flab">Assign DID#</label><select id="nsDid" class="teamemail"></select></div>
+          <button class="btn primary" onclick="addSub()">Add sub-vendor →</button>
+        </div>
+        <div class="muted" id="poolNote" style="font-size:12px;margin-top:11px"></div>
+      </div>
+      <div class="note">DID#s in the dropdown are <b>pre-provisioned to your account</b> — pick one for each new sub-vendor (1:1 DID↔pubID, permanent). New sub-vendors start at zero and fill in as calls arrive. Each login is <b>scoped to its own pubID</b>; switch the role selector to <b>Sub-vendor</b> to preview it.</div>
     </section>
 
     <!-- ADMIN -->
@@ -271,16 +288,16 @@ const adj = (n,sc)=> Math.round(n*(1-sc));
 const pct = (x)=> (x*100).toFixed(1)+'%';
 
 const VENDORS = [
-  {name:'LivMed', key:'LIVMED', rate:250, scrub:.08, subs:[
+  {name:'LivMed', key:'LIVMED', rate:250, scrub:.08, pool:['8447120094','8447120118'], subs:[
     {name:'LivMed — Daypart',  pub:'livmed-day',   did:'8447120033', total:1850, qual:224, fifo:210, lifo:213, login:{status:'active', email:'ops@livmed-day.com'}},
     {name:'LivMed — Overnight',pub:'livmed-night', did:'8447120061', total:1480, qual:170, fifo:162, lifo:160, login:{status:'none',   email:''}},
   ]},
-  {name:'RedPeak Media', key:'REDPEAK', rate:265, scrub:.05, subs:[
+  {name:'RedPeak Media', key:'REDPEAK', rate:265, scrub:.05, pool:['2138840161'], subs:[
     {name:'RedPeak A', pub:'redpeak-a', did:'2138840097', total:1320, qual:126, fifo:120, lifo:121, login:{status:'active',  email:'a@redpeak.com'}},
     {name:'RedPeak B', pub:'redpeak-b', did:'2138840102', total:1280, qual:124, fifo:118, lifo:119, login:{status:'invited', email:'b@redpeak.com'}},
     {name:'RedPeak C', pub:'redpeak-c', did:'2138840145', total:920,  qual:84,  fifo:80,  lifo:79,  login:{status:'none',    email:''}},
   ]},
-  {name:'Coastal Connect', key:'COASTAL', rate:240, scrub:.12, subs:[
+  {name:'Coastal Connect', key:'COASTAL', rate:240, scrub:.12, pool:[], subs:[
     {name:'Coastal Prime', pub:'coastal-a', did:'7274451180', total:2010, qual:223, fifo:219, lifo:223, login:{status:'active', email:'team@coastalconnect.io'}},
   ]},
 ];
@@ -314,13 +331,13 @@ function render(){
     const bill = showAdj?A.net:A.gross, ar = showAdj?A.arN:A.arG;
     $('#kpis').innerHTML = card('Gross calls', INGESTED.toLocaleString())
       + card('Qualified ≥630s', QUALIFIED.toLocaleString(), pct(QUALIFIED/INGESTED)+' of gross')
-      + card('Billable '+(showAdj?'(net)':'(gross)'), bill.toLocaleString(), showAdj?`was ${A.gross} before scrub`:`${S.method.toUpperCase()} keeper`, true)
+      + card('Billable '+(showAdj?'(net)':'(gross)'), bill.toLocaleString(), showAdj?'≥630s':`${S.method.toUpperCase()} keeper`, true)
       + card('AR · this week', money(ar), `${bill} × rate`, true, true);
   } else {
-    $('#kpis').innerHTML = card('Total calls', A.calls.toLocaleString())
-      + card('Qualified ≥630s', A.qual.toLocaleString(), pct(A.qual/A.calls)+' of total')
-      + card('Calls paid', A.net.toLocaleString(), pct(A.net/A.qual)+' of qualified', true)
-      + card('Earnings', money(A.arN), `${A.net} paid × rate`, true, true);
+    // VENDOR-FACING — gross calls, billable (≥630s), gross payout. Scrub is never shown.
+    $('#kpis').innerHTML = card('Gross calls', A.calls.toLocaleString())
+      + card('Billable calls', A.net.toLocaleString(), '≥630s talk time')
+      + card('Gross payout', money(A.arN), `${A.net} billable × ${money(scope()[0].rate)}/call`, true, true);
   }
 
   // main table
@@ -365,16 +382,21 @@ function drillVendor(vi){
   });
   openDrill(v.name+' — sub-vendors', `${v.subs.length} sub-vendors · ${(v.scrub*100).toFixed(0)}% scrub · ${money(v.rate)}/call · click a sub for call detail`, h+'</tbody></table>');
 }
+function fakePhone(s,i){
+  const base=(parseInt(s.did.slice(-6))||482137)+i*8389;
+  const ac=300+(base%600), ex=200+((base>>3)%700), ln=(base>>5)%10000;
+  return `(${ac}) ${String(ex).padStart(3,'0')}-${String(ln).padStart(4,'0')}`;
+}
 function sampleCalls(s){
   const rows=[], dispo=['Transfer Sale','Transfer Sale','No Sale','Voicemail','Transfer Sale','Transfer Sale'];
   for(let i=0;i<16;i++){ const dur=180+((i*173+s.total)%980); const d=dispo[i%dispo.length];
-    rows.push({id:'CS-'+s.did.slice(-4)+'-'+(2200+i), date:'2026-06-0'+((i%6)+1), dur, dispo:d, billable: dur>=630 && d==='Transfer Sale'}); }
+    rows.push({id:'CS-'+s.did.slice(-4)+'-'+(2200+i), phone:fakePhone(s,i), date:'2026-06-0'+((i%6)+1), dur, dispo:d, billable: dur>=630 && d==='Transfer Sale'}); }
   return rows;
 }
 function drillSub(vkey,si){
   const v=vendorOf(vkey), s=v.subs[si], rows=sampleCalls(s);
-  let h='<table><thead><tr><th>CallShaper ID</th><th>Date</th><th>Duration (s)</th><th>Disposition</th><th>Billable</th></tr></thead><tbody>';
-  rows.forEach(r=>{ h+=`<tr><td class="mono">${r.id}</td><td>${r.date}</td>`
+  let h='<table><thead><tr><th>CallShaper ID</th><th>DID#</th><th>Caller phone</th><th>Date</th><th>Duration (s)</th><th>Disposition</th><th>Billable</th></tr></thead><tbody>';
+  rows.forEach(r=>{ h+=`<tr><td class="mono">${r.id}</td><td class="mono">${s.did}</td><td class="mono">${r.phone}</td><td>${r.date}</td>`
     +`<td class="num" style="${r.dur>=630?'color:var(--green);font-weight:600':''}">${r.dur}</td>`
     +`<td>${r.dispo}</td><td>${r.billable?'<span class="pill green">billable</span>':'<span class="pill gray">—</span>'}</td></tr>`; });
   openDrill(`${s.pub} — calls`, `${s.name} · DID ${s.did} · ${s.total} calls · ${s.qual} qualified ≥630s · sample shown`, h+'</tbody></table>');
@@ -398,34 +420,64 @@ function renderInvoices(){
     $('#scen').innerHTML=cells.map(([l,c,a,best])=>`<div class="c${best?' best':''}"><div class="lab">${l}${best?' · issuing':''}</div><div class="big num">${c}</div><div class="sm">${money(a)}</div></div>`).join('');
     $('#scenMethod').textContent=S.method.toUpperCase();
   } else {
-    const vs=scope(), A=agg(vs), base=A.net, blend=A.arN/Math.max(1,A.net);
-    const wk=[['Jun 1 – Jun 7',base,'amber','Draft'],['May 25 – May 31',Math.round(base*.96),'amber','Unpaid'],
-      ['May 18 – May 24',Math.round(base*1.02),'green','Paid'],['May 11 – May 17',Math.round(base*.94),'green','Paid'],
-      ['May 4 – May 10',Math.round(base*.99),'green','Paid'],['Apr 27 – May 3',Math.round(base*.91),'green','Paid']];
-    let h='<table><thead><tr><th>Week</th><th>Billable</th><th>Amount</th><th>Status</th><th></th></tr></thead><tbody>';
-    wk.forEach(([w,b,cl,lab])=>{ h+=`<tr><td>${w}</td><td class="num">${b}</td><td class="num"><b>${money(b*blend)}</b></td><td><span class="pill ${cl}">${lab}</span></td><td>${lab==='Draft'?'':'<button class="btn sm" onclick="dlInv()">Download</button>'}</td></tr>`; });
-    $('#invVendorBody').innerHTML=h+'</tbody></table>';
+    const v=scope()[0];
+    let owed=0, subH='<table><thead><tr><th>Sub-vendor</th><th>DID#</th><th>Billable</th><th>Amount</th></tr></thead><tbody>';
+    v.subs.forEach(s=>{ const b=subBill(v,s), amt=b.net*v.rate; owed+=amt;
+      subH+=`<tr><td class="v">${s.pub}<div class="sub2">${s.name}</div></td><td class="mono">${s.did}</td><td class="num">${b.net}</td><td class="num"><b>${money(amt)}</b></td></tr>`; });
+    subH+=`<tr><td><b>Total · this week</b></td><td></td><td></td><td class="num"><b>${money(owed)}</b></td></tr></tbody></table>`;
+    $('#invVendorSubs').innerHTML=subH;
+    const base=owed;
+    const wk=[['May 25 – May 31',Math.round(base*.96),'amber','Owed'],['May 18 – May 24',Math.round(base*1.02),'green','Paid'],
+      ['May 11 – May 17',Math.round(base*.94),'green','Paid'],['May 4 – May 10',Math.round(base*.99),'green','Paid'],['Apr 27 – May 3',Math.round(base*.91),'green','Paid']];
+    let paid=0,out=base;
+    let hist='<table><thead><tr><th>Week</th><th>Amount</th><th>Status</th><th></th></tr></thead><tbody>';
+    hist+=`<tr><td>Jun 1 – Jun 7 <span class="tag">current</span></td><td class="num"><b>${money(base)}</b></td><td><span class="pill gray">Draft</span></td><td></td></tr>`;
+    wk.forEach(([w,a,cl,lab])=>{ if(lab==='Paid')paid+=a; else out+=a;
+      hist+=`<tr><td>${w}</td><td class="num"><b>${money(a)}</b></td><td><span class="pill ${cl}">${lab}</span></td><td><button class="btn sm" onclick="dlInv()">Download</button></td></tr>`; });
+    $('#invVendorHist').innerHTML=hist+'</tbody></table>';
+    $('#invVendorKpis').innerHTML = card('Owed (outstanding)', money(out), 'incl. current week', true, true) + card('Paid · last 90d', money(paid), '', false, true);
   }
 }
 
 /* ---------- team ---------- */
 function renderTeam(){
-  const v=scope()[0]; let h='<table><thead><tr><th>Sub-vendor</th><th>pubID</th><th>Login email</th><th>Status</th><th></th></tr></thead><tbody>';
+  const v=scope()[0]; let h='<table><thead><tr><th>Sub-vendor</th><th>pubID</th><th>DID#</th><th>Login email</th><th>Status</th><th></th></tr></thead><tbody>';
   v.subs.forEach((s,si)=>{ const st=s.login.status;
     const chip=st==='active'?'<span class="pill green">Active</span>':st==='invited'?'<span class="pill amber">Invited</span>':'<span class="pill gray">No login</span>';
     const email=st==='none'?`<input class="teamemail" id="te-${si}" placeholder="email@subvendor.com">`:`<span class="mono">${s.login.email}</span>`;
     const act=st==='active'?`<button class="btn sm" onclick="toast('Reset link sent')">Reset</button>`:`<button class="btn primary sm" onclick="invite(${si})">${st==='invited'?'Resend':'Invite'} →</button>`;
-    h+=`<tr><td><b>${s.name}</b></td><td class="mono">${s.pub}</td><td>${email}</td><td>${chip}</td><td>${act}</td></tr>`;
+    h+=`<tr><td><b>${s.name}</b></td><td class="mono">${s.pub}</td><td class="mono">${s.did}</td><td>${email}</td><td>${chip}</td><td>${act}</td></tr>`;
   });
   $('#teamBody').innerHTML=h+'</tbody></table>';
+  const sel=$('#nsDid'); if(sel){ sel.innerHTML = v.pool.length? v.pool.map(d=>`<option>${d}</option>`).join('') : '<option value="">— none available —</option>';
+    $('#poolNote').textContent = `${v.pool.length} DID# pre-provisioned and available to assign.`; }
 }
 function invite(si){ const v=scope()[0],s=v.subs[si]; const inp=document.getElementById('te-'+si);
   s.login.email=(inp&&inp.value.trim())||s.login.email||`team@${s.pub}.com`; s.login.status='active'; renderTeam(); toast(`Login created for ${s.pub} → ${s.login.email}`); }
+function addSub(){
+  const v=scope()[0], name=$('#nsName').value.trim(), pub=$('#nsPub').value.trim(), did=$('#nsDid').value;
+  if(!name||!pub){ toast('Enter a name and pubID'); return; }
+  if(!did){ toast('No DID available — request more from Aurion'); return; }
+  v.pool=v.pool.filter(d=>d!==did);
+  v.subs.push({name, pub, did, total:0, qual:0, fifo:0, lifo:0, login:{status:'none',email:''}});
+  $('#nsName').value=''; $('#nsPub').value='';
+  renderTeam(); render();
+  toast(`Sub-vendor ${pub} created · DID ${did} assigned`);
+}
 
 /* ---------- admin + health ---------- */
+function setRate(i,val){ VENDORS[i].rate=Math.max(0,parseInt(val)||0); render(); renderAdmin(); toast(`${VENDORS[i].name} rate → ${money(VENDORS[i].rate)}/call`); }
+function setScrub(i,val){ VENDORS[i].scrub=Math.min(1,Math.max(0,(parseFloat(val)||0)/100)); render(); renderAdmin(); toast(`${VENDORS[i].name} scrub → ${(VENDORS[i].scrub*100).toFixed(0)}% · adjusts vendor-facing only`); }
 function renderAdmin(){
-  let h='<table><thead><tr><th>Vendor</th><th>Subs</th><th>Rate</th><th>Scrub</th></tr></thead><tbody>';
-  VENDORS.forEach(v=>h+=`<tr><td><b>${v.name}</b> <span class="tag">${v.key}</span></td><td class="num">${v.subs.length}</td><td class="num">${money(v.rate)}</td><td class="num">${(v.scrub*100).toFixed(0)}%</td></tr>`);
+  let h='<p class="muted" style="font-size:12px;margin-bottom:8px">Edit a rate or scrub — <b>TRUE billable stays the same</b>, the <b>vendor-facing</b> net &amp; AR adjust live. Flip the dashboard lens to see the delta.</p>';
+  h+='<table><thead><tr><th>Vendor</th><th>Subs</th><th>Rate $/call</th><th>Scrub %</th><th>Billable net / gross</th><th>AR · vendor-facing</th></tr></thead><tbody>';
+  VENDORS.forEach((v,i)=>{ const a=agg([v]);
+    h+=`<tr><td><b>${v.name}</b> <span class="tag">${v.key}</span></td><td class="num">${v.subs.length}</td>`
+     +`<td><input class="adminEdit num" type="number" min="0" value="${v.rate}" onchange="setRate(${i},this.value)" style="width:84px"></td>`
+     +`<td><input class="adminEdit num" type="number" min="0" max="100" value="${(v.scrub*100).toFixed(0)}" onchange="setScrub(${i},this.value)" style="width:60px"> %</td>`
+     +`<td class="num"><b>${a.net}</b> <span class="muted" style="font-size:11px">/ ${a.gross}</span></td>`
+     +`<td class="num"><b>${money(a.arN)}</b></td></tr>`;
+  });
   $('#adminVendors').innerHTML=h+'</tbody></table>';
   if(UNKNOWN.length){ let u='<table><thead><tr><th>DID</th><th>Calls</th><th>First seen</th><th></th></tr></thead><tbody>';
     UNKNOWN.forEach((x,i)=>u+=`<tr><td class="mono">${x.did}</td><td class="num">${x.calls}</td><td>${x.seen}</td><td><button class="btn primary sm" onclick="assignUnknown(${i})">Assign →</button></td></tr>`);
