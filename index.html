@@ -469,12 +469,12 @@ function addSub(){
 function setRate(i,val){ VENDORS[i].rate=Math.max(0,parseInt(val)||0); render(); renderAdmin(); toast(`${VENDORS[i].name} rate → ${money(VENDORS[i].rate)}/call`); }
 function setScrub(i,val){ VENDORS[i].scrub=Math.min(1,Math.max(0,(parseFloat(val)||0)/100)); render(); renderAdmin(); toast(`${VENDORS[i].name} scrub → ${(VENDORS[i].scrub*100).toFixed(0)}% · adjusts vendor-facing only`); }
 function renderAdmin(){
-  let h='<p class="muted" style="font-size:12px;margin-bottom:8px">Edit a rate or scrub — <b>TRUE billable stays the same</b>, the <b>vendor-facing</b> net &amp; AR adjust live. Flip the dashboard lens to see the delta.</p>';
-  h+='<table><thead><tr><th>Vendor</th><th>Subs</th><th>Rate $/call</th><th>Scrub %</th><th>Billable net / gross</th><th>AR · vendor-facing</th></tr></thead><tbody>';
+  let h='<p class="muted" style="font-size:12px;margin-bottom:8px"><span class="pill amber">🔒 admin-only</span> <b>Scrub is never visible to vendors</b> — they can\'t see or set it, and it appears nowhere in the vendor view. Editing rate or scrub keeps <b>TRUE billable</b> unchanged while the <b>vendor-facing</b> net &amp; AR adjust live; flip the dashboard lens to see the delta.</p>';
+  h+='<table><thead><tr><th>Vendor</th><th>Subs</th><th>Rate $/call</th><th>Scrub % 🔒</th><th>Billable net / gross</th><th>AR · vendor-facing</th></tr></thead><tbody>';
   VENDORS.forEach((v,i)=>{ const a=agg([v]);
     h+=`<tr><td><b>${v.name}</b> <span class="tag">${v.key}</span></td><td class="num">${v.subs.length}</td>`
      +`<td><input class="adminEdit num" type="number" min="0" value="${v.rate}" onchange="setRate(${i},this.value)" style="width:84px"></td>`
-     +`<td><input class="adminEdit num" type="number" min="0" max="100" value="${(v.scrub*100).toFixed(0)}" onchange="setScrub(${i},this.value)" style="width:60px"> %</td>`
+     +`<td title="Admin-only — hidden from vendors"><input class="adminEdit num" type="number" min="0" max="100" value="${(v.scrub*100).toFixed(0)}" onchange="setScrub(${i},this.value)" style="width:60px"> %</td>`
      +`<td class="num"><b>${a.net}</b> <span class="muted" style="font-size:11px">/ ${a.gross}</span></td>`
      +`<td class="num"><b>${money(a.arN)}</b></td></tr>`;
   });
