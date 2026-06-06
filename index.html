@@ -182,6 +182,10 @@
       <span>View</span>
       <span class="seg" id="lensSeg"><button class="on" data-lens="true">TRUE</button><button data-lens="adj">Vendor-facing</button></span>
     </div>
+    <div style="display:flex;gap:6px;align-items:flex-end;margin-left:auto">
+      <div><label class="flab">Search phone</label><input id="phsearch" class="adminEdit" placeholder="10-digit phone" inputmode="numeric" style="width:140px"></div>
+      <button class="btn sm" onclick="searchPhone()">Find</button>
+    </div>
     <span id="meta" class="muted"></span>
   </div>
 
@@ -400,27 +404,28 @@ function drillVendor(vi){
   });
   openDrill(v.name+' — sub-vendors', `${v.subs.length} sub-vendors · ${(v.scrub*100).toFixed(0)}% scrub · ${money(v.rate)}/call · click a sub for call detail`, h+'</tbody></table>');
 }
-function hashPhone(s,i){ // salted-HMAC stand-in — deterministic, irreversible, no raw PII
-  let x=((parseInt(s.did.slice(-6))||482137) ^ ((i+1)*2654435761))>>>0;
-  return 'ph_'+x.toString(16).padStart(8,'0').slice(-8);
+function fakePhone(s,i){
+  const base=((parseInt(s.did.slice(-6))||482137) + i*8389)>>>0;
+  const ac=200+(base%800), ex=200+((base>>3)%800), ln=base%10000;
+  return `(${ac}) ${String(ex).padStart(3,'0')}-${String(ln).padStart(4,'0')}`;
 }
 function sampleCalls(s){
   const rows=[], dispo=['Transfer Sale','Transfer Sale','No Sale','Voicemail','Transfer Sale','Transfer Sale'];
   for(let i=0;i<16;i++){ const dur=180+((i*173+s.total)%980); const d=dispo[i%dispo.length];
-    rows.push({id:'CS-'+s.did.slice(-4)+'-'+(2200+i), phone:hashPhone(s,i), date:'2026-06-0'+((i%6)+1), dur, dispo:d, billable: dur>=630 && d==='Transfer Sale'}); }
+    rows.push({id:'CS-'+s.did.slice(-4)+'-'+(2200+i), phone:fakePhone(s,i), date:'2026-06-0'+((i%6)+1), dur, dispo:d, billable: dur>=630 && d==='Transfer Sale'}); }
   return rows;
 }
 function drillSub(vkey,si){
   const v=vendorOf(vkey), s=v.subs[si], admin=S.role==='admin';
   let rows=sampleCalls(s);
   if(!admin) rows=rows.filter(r=>r.billable);   // vendor sees ONLY billable calls — scrubbed/non-billable never shown
-  let h='<table><thead><tr><th>CallShaper ID</th><th>DID#</th><th>Date</th><th>Duration (s)</th><th>Disposition</th><th>Billable</th></tr></thead><tbody>';
-  rows.forEach(r=>{ h+=`<tr><td class="mono">${r.id}</td><td class="mono">${s.did}</td><td>${r.date}</td>`
+  let h='<table><thead><tr><th>CallShaper ID</th><th>DID#</th><th>Caller phone</th><th>Date</th><th>Duration (s)</th><th>Disposition</th><th>Billable</th></tr></thead><tbody>';
+  rows.forEach(r=>{ h+=`<tr><td class="mono">${r.id}</td><td class="mono">${s.did}</td><td class="mono">${r.phone}</td><td>${r.date}</td>`
     +`<td class="num" style="${r.dur>=630?'color:var(--green);font-weight:600':''}">${r.dur}</td>`
     +`<td>${r.dispo}</td><td>${r.billable?'<span class="pill green">billable</span>':'<span class="pill gray">—</span>'}</td></tr>`; });
   const meta = admin
-    ? `${s.name} · DID ${s.did} · all calls · no caller PII shown`
-    : `${s.name} · DID ${s.did} · billable calls only · no caller PII shown`;
+    ? `${s.name} · DID ${s.did} · all calls`
+    : `${s.name} · DID ${s.did} · billable calls only`;
   openDrill(`${s.pub} — calls`, meta, h+'</tbody></table>');
 }
 
@@ -544,6 +549,24 @@ function setRange(k){ const p=PRESETS[k]; RANGE.factor=p.factor; RANGE.label=p.l
 function customRange(){ const f=$('#from').value,t=$('#to').value; if(!f||!t)return; const days=Math.max(1,Math.round((new Date(t)-new Date(f))/864e5)+1); RANGE.factor=days/7; RANGE.label=f+' → '+t; render(); }
 document.querySelectorAll('.controls [data-range]').forEach(b=>b.onclick=()=>setRange(b.dataset.range));
 $('#from').addEventListener('change',customRange); $('#to').addEventListener('change',customRange);
+
+// search by phone — available to ALL logins, scoped to the caller's own data
+function fmtPhone(p){ return `(${p.slice(0,3)}) ${p.slice(3,6)}-${p.slice(6)}`; }
+function searchPhone(){
+  const p=($('#phsearch').value||'').replace(/\D/g,'').slice(-10);
+  if(p.length!==10){ toast('Enter a 10-digit phone number'); return; }
+  const subs=[]; scope().forEach(v=>v.subs.forEach(s=>subs.push({v,s})));
+  if(!subs.length){ toast('No data in scope'); return; }
+  const pick=subs[parseInt(p.slice(-4))%subs.length];
+  const dur=180+(parseInt(p.slice(-3))%980), billable=dur>=630;
+  const id='CS-'+pick.s.did.slice(-4)+'-'+p.slice(-4);
+  const h='<table><thead><tr><th>CallShaper ID</th><th>Sub-vendor</th><th>DID#</th><th>Caller phone</th><th>Date</th><th>Duration (s)</th><th>Disposition</th><th>Billable</th></tr></thead><tbody>'
+    +`<tr><td class="mono">${id}</td><td>${pick.s.pub}</td><td class="mono">${pick.s.did}</td><td class="mono">${fmtPhone(p)}</td>`
+    +`<td>2026-06-0${(parseInt(p.slice(-1))%6)+1}</td><td class="num" style="${dur>=630?'color:var(--green);font-weight:600':''}">${dur}</td>`
+    +`<td>${billable?'Transfer Sale':'No Sale'}</td><td>${billable?'<span class="pill green">billable</span>':'<span class="pill gray">not billable</span>'}</td></tr></tbody></table>`;
+  openDrill('Phone '+fmtPhone(p)+' — lookup', (S.role==='admin'?'searched across all vendors':'searched within your own data')+' · 1 match', h);
+}
+$('#phsearch').addEventListener('keydown',e=>{ if(e.key==='Enter') searchPhone(); });
 
 // preview any sub-vendor's 1:1 scoped view (each sub has a unique login + own-data-only view)
 function previewSub(pub){ S.role='sub'; S.subPub=pub; $('#role').value='sub'; applyRole(); setView('dash'); render(); toast('Previewing 1:1 view — '+pub+' sees only its own data'); }
