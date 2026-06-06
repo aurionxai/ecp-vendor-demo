@@ -488,9 +488,9 @@ function renderAP(){
   $('#apCount').textContent = `${rows.length} of ${INVOICES.length} invoices`;
   let h='<table><thead><tr><th>Vendor</th><th>Week</th><th>Amount</th><th>AP status</th><th></th></tr></thead><tbody>';
   rows.forEach(r=>{ const idx=INVOICES.indexOf(r);
-    h+=`<tr><td><b>${r.vname}</b></td><td>${r.week}${r.wi===0?' <span class="tag">current</span>':''}</td><td class="num"><b>${money(r.amount)}</b></td>`
+    h+=`<tr><td class="v"><a onclick="drillInvoice(${idx})">${r.vname}</a></td><td>${r.week}${r.wi===0?' <span class="tag">current</span>':''}</td><td class="num"><b>${money(r.amount)}</b></td>`
      +`<td><select class="adminEdit" onchange="setInvStatus(${idx},this.value)">`+['unpaid','paid','paid-direct','disputed'].map(s=>`<option ${s===r.status?'selected':''}>${s}</option>`).join('')+`</select></td>`
-     +`<td><button class="btn sm" onclick="sendQB(${idx})">Send → QB</button></td></tr>`;
+     +`<td><button class="btn sm" onclick="drillInvoice(${idx})">Calls →</button> <button class="btn sm" onclick="sendQB(${idx})">Send → QB</button></td></tr>`;
   });
   if(!rows.length) h+='<tr><td colspan="5" class="muted" style="text-align:center;padding:20px">No matching invoices</td></tr>';
   $('#apLedger').innerHTML=h+'</tbody></table>';
@@ -501,6 +501,27 @@ function sendQB(which){
   else { const r=INVOICES[which]; toast(`${r.vname} · ${r.week} pushed to QuickBooks (sent for payment)`); }
 }
 function lockWeek(){ toast('Week locked — immutable snapshot + BilledLead written; pushed to QuickBooks'); }
+// per-invoice billable-call detail — mark each call paid/unpaid/disputed (invoice rollup stays separate)
+function genInvoiceCalls(inv){
+  if(inv.calls) return inv.calls;
+  const v=vendorOf(inv.vendor), calls=[]; let n=0;
+  v.subs.forEach(s=>{ const cnt=Math.min(8, Math.max(1, Math.round(adj(s.fifo,v.scrub)/30)));
+    for(let i=0;i<cnt;i++){ const dur=630+((i*97+inv.wi*31+s.total)%820);
+      calls.push({id:'CS-'+s.did.slice(-4)+'-'+inv.wi+(100+n), sub:s.pub, subName:s.name, did:s.did, phone:fakePhone(s,i+inv.wi), dur, amt:v.rate, status:'unpaid'}); n++; }
+  });
+  inv.calls=calls; return calls;
+}
+function drillInvoice(idx){
+  const inv=INVOICES[idx], calls=genInvoiceCalls(inv);
+  const cnt=st=>calls.filter(c=>c.status===st).length;
+  let h='<table><thead><tr><th>CallShaper ID</th><th>Sub-vendor</th><th>DID#</th><th>Caller phone</th><th>Duration (s)</th><th>Amount</th><th>Status</th></tr></thead><tbody>';
+  calls.forEach((c,ci)=>{ h+=`<tr><td class="mono">${c.id}</td><td>${c.sub}</td><td class="mono">${c.did}</td><td class="mono">${c.phone}</td>`
+    +`<td class="num" style="color:var(--green);font-weight:600">${c.dur}</td><td class="num">${money(c.amt)}</td>`
+    +`<td><select class="adminEdit" onchange="setCallStatus(${idx},${ci},this.value)">`+['unpaid','paid','disputed'].map(s=>`<option ${s===c.status?'selected':''}>${s}</option>`).join('')+`</select></td></tr>`; });
+  const meta=`${calls.length} billable calls · ${cnt('paid')} paid · ${cnt('unpaid')} unpaid · ${cnt('disputed')} disputed · ${money(inv.amount)} invoice · the invoice-level rollup status stays separate`;
+  openDrill(`${inv.vname} · ${inv.week} — billable calls`, meta, h+'</tbody></table>');
+}
+function setCallStatus(idx,ci,st){ INVOICES[idx].calls[ci].status=st; drillInvoice(idx); }
 
 /* ---------- team ---------- */
 function renderTeam(){
