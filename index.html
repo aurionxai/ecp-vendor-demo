@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>ECP — Vendor Reporting (mockup)</title>
+<title>Pharmacy Call Tracking (mockup)</title>
 <style>
   :root{--bg:#0f172a;--card:#fff;--ink:#0f172a;--muted:#64748b;--line:#e5e7eb;
         --blue:#1e40af;--blue2:#eef2ff;--green:#15803d;--amber:#b45309;--red:#b91c1c;--soft:#f1f5f9;}
@@ -139,8 +139,8 @@
       </button>
       <button class="pcard ecp" onclick="enterApp()">
         <div class="ptag">new</div>
-        <h3>ECP Vendor Reporting</h3>
-        <p>Vendor-side billable calls, scrub &amp; weekly invoices.</p>
+        <h3>Pharmacy Call Tracking</h3>
+        <p>Vendor billable calls, client AR &amp; margin, weekly invoices.</p>
         <span class="parrow">Open →</span>
       </button>
     </div>
@@ -151,7 +151,7 @@
 <!-- ============ APP ============ -->
 <div id="app">
   <header>
-    <h1>ECP <span class="hsub">Vendor Reporting</span></h1>
+    <h1>Pharmacy Call Tracking <span class="hsub">vendor billing &amp; client margin</span></h1>
     <nav id="nav">
       <a data-v="dash" class="on">Dashboard</a>
       <a data-v="inv">Invoices</a>
@@ -252,6 +252,10 @@
 
     <!-- ADMIN -->
     <section class="view" id="v-admin">
+      <h2>Client &amp; margin (AR / AP)</h2>
+      <div class="kpis" id="marginKpis"></div>
+      <div class="cfg" id="clientCfg" style="margin-top:6px;margin-bottom:6px"></div>
+      <div class="note" style="margin-top:0;margin-bottom:22px"><b>AR</b> = the client pays us per call <b>connected ≥120s</b> (no consumer dedup — every connected call is revenue). <b>AP</b> = we pay the vendor per <b>≥630s</b> deduped call. The gap (≥120s but not ≥630s, plus repeat/unattributed callers) is <b>in-house margin</b> — billed to the client, no vendor cost. Both thresholds are editable above.</div>
       <div class="grid2">
         <div>
           <h2>Vendors &amp; rates</h2>
@@ -262,10 +266,10 @@
         <div>
           <h2>Billing engine</h2>
           <div class="cfg">
-            <div class="row"><span class="k">Payable threshold</span><span>preXfer + postXfer ≥ 630s</span></div>
+            <div class="row"><span class="k">Thresholds (editable above)</span><span>AP ≥630s · AR ≥120s connected</span></div>
             <div class="row"><span class="k">Keeper method</span><span>FIFO · LIFO selectable</span></div>
             <div class="row"><span class="k">Special-rule hooks</span><span>closest-date · no-downgrade · DID-auth</span></div>
-            <div class="row"><span class="k">Scrub</span><span>deterministic · hash(callID) &lt; rate</span></div>
+            <div class="row"><span class="k">Scrub</span><span>duration haircut vs vendor fraud (admin-only)</span></div>
             <div class="row"><span class="k">Default rate</span><span>$250.00 / call</span></div>
             <div class="row"><span class="k">Ingest interval</span><span>15 min · multi-bucket S3</span></div>
           </div>
@@ -283,13 +287,14 @@
         <div><h2>Recent ingest runs</h2><div id="runsBody"></div></div>
         <div><h2>S3 buckets</h2><div id="bucketsBody"></div>
           <div class="cfg" style="margin-top:14px">
-            <div class="row"><span class="k">Unknown DIDs (excluded)</span><span id="hUnknown"></span></div>
+            <div class="row"><span class="k">Unmapped vendor DIDs → assign</span><span id="hUnknown"></span></div>
+            <div class="row"><span class="k">In-house / unattributed</span><span style="color:var(--green)">billed to client · no vendor cost</span></div>
             <div class="row"><span class="k">Malformed rows skipped</span><span>3 · logged, non-fatal</span></div>
             <div class="row"><span class="k">Cross-file dupes</span><span>merged losslessly by callID</span></div>
           </div>
         </div>
       </div>
-      <div class="note">Unknown / unmatched never fabricate a call — they're quarantined and cleared via the <b>Unknown-DID assign</b> flow (Admin). Re-ingesting a processed file is a no-op.</div>
+      <div class="note"><b>Unattributable calls are a profit center</b> — repeat callers / our own outbound that map to no vendor are <b>billed to the client (AR) with no vendor cost</b>. Genuinely new <b>vendor</b> DIDs land in the Unknown queue to assign (Admin). Re-ingesting a processed file is a no-op.</div>
     </section>
   </main>
 </div>
@@ -338,6 +343,9 @@ const PRESETS={
   month:    {factor:4.3, label:'June 2026',             from:'2026-06-01',to:'2026-06-30'},
   lastmonth:{factor:4.4, label:'May 2026',              from:'2026-05-01',to:'2026-05-31'},
 };
+// AR side (client pays us) + thresholds. AR billable = connected ≥ arSec; AP billable = call ≥ apSec.
+const CONFIG = { client:'Exact Care Pharmacy', arSec:120, apSec:630, arRateCents:30000,
+                 arCallsAttributed:1320, arCallsInhouse:180 };
 
 const vendorOf = key => VENDORS.find(v=>v.key===key);
 function scope(){
@@ -554,8 +562,8 @@ function addSub(){
 function setRate(i,val){ VENDORS[i].rate=Math.max(0,parseInt(val)||0); render(); renderAdmin(); toast(`${VENDORS[i].name} rate → ${money(VENDORS[i].rate)}/call`); }
 function setScrub(i,val){ VENDORS[i].scrub=Math.min(1,Math.max(0,(parseFloat(val)||0)/100)); render(); renderAdmin(); toast(`${VENDORS[i].name} scrub → ${(VENDORS[i].scrub*100).toFixed(0)}% · adjusts vendor-facing only`); }
 function renderAdmin(){
-  let h='<p class="muted" style="font-size:12px;margin-bottom:8px"><span class="pill amber">🔒 admin-only</span> <b>Scrub is never visible to vendors</b> — they can\'t see or set it, and it appears nowhere in the vendor view. Editing rate or scrub keeps <b>TRUE billable</b> unchanged while the <b>vendor-facing</b> net &amp; AR adjust live; flip the dashboard lens to see the delta.</p>';
-  h+='<table><thead><tr><th>Vendor</th><th>Subs</th><th>Rate $/call</th><th>Scrub % 🔒</th><th>Billable net / gross</th><th>AR · vendor-facing</th></tr></thead><tbody>';
+  let h='<p class="muted" style="font-size:12px;margin-bottom:8px"><span class="pill amber">🔒 admin-only</span> <b>Scrub</b> haircuts a call\'s seconds below the AP threshold so padded/fraudulent calls don\'t bill — it\'s a <b>fraud control</b>, never visible to vendors. Editing rate or scrub keeps <b>TRUE billable</b> unchanged while the <b>vendor payout</b> adjusts live.</p>';
+  h+='<table><thead><tr><th>Vendor</th><th>Subs</th><th>Rate $/call</th><th>Scrub % 🔒</th><th>Billable net / gross</th><th>Payout (our AP)</th></tr></thead><tbody>';
   VENDORS.forEach((v,i)=>{ const a=agg([v]);
     h+=`<tr><td><b>${v.name}</b> <span class="tag">${v.key}</span></td><td class="num">${v.subs.length}</td>`
      +`<td><input class="adminEdit num" type="number" min="0" value="${v.rate}" onchange="setRate(${i},this.value)" style="width:84px"></td>`
@@ -568,6 +576,31 @@ function renderAdmin(){
     UNKNOWN.forEach((x,i)=>u+=`<tr><td class="mono">${x.did}</td><td class="num">${x.calls}</td><td>${x.seen}</td><td><button class="btn primary sm" onclick="assignUnknown(${i})">Assign →</button></td></tr>`);
     $('#unknownQ').innerHTML=u+'</tbody></table>';
   } else $('#unknownQ').innerHTML='<div class="note" style="margin-top:0;color:var(--green)">✓ Queue clear — all DIDs resolved</div>';
+  renderMargin();
+}
+function renderMargin(){
+  const arRate=CONFIG.arRateCents/100;
+  const arCalls=CONFIG.arCallsAttributed+CONFIG.arCallsInhouse;
+  const arRev=arCalls*arRate, inhouse=CONFIG.arCallsInhouse*arRate;
+  let apCost=0; VENDORS.forEach(v=>{ apCost += agg([v]).arN; });
+  const margin=arRev-apCost;
+  $('#marginKpis').innerHTML = card('AR revenue · '+CONFIG.client, money(arRev), `${arCalls} connected ≥${CONFIG.arSec}s`)
+    + card('AP cost · vendors', money(apCost), 'what we pay vendors')
+    + card('In-house (unattributed)', money(inhouse), `${CONFIG.arCallsInhouse} calls · no vendor cost`, false, true)
+    + card('Margin', money(margin), 'AR − AP', true, true);
+  $('#clientCfg').innerHTML =
+     `<div class="row"><span class="k">Client (pays us)</span><input class="adminEdit" value="${CONFIG.client}" onchange="setCfg('client',this.value)" style="width:210px"></div>`
+    +`<div class="row"><span class="k">AR threshold — client pays when connected ≥</span><span><input class="adminEdit num" type="number" value="${CONFIG.arSec}" onchange="setCfg('arSec',this.value)" style="width:68px"> sec</span></div>`
+    +`<div class="row"><span class="k">AP threshold — we pay vendor when call ≥</span><span><input class="adminEdit num" type="number" value="${CONFIG.apSec}" onchange="setCfg('apSec',this.value)" style="width:68px"> sec</span></div>`
+    +`<div class="row"><span class="k">AR rate — client pays per connected call</span><span>$<input class="adminEdit num" type="number" value="${CONFIG.arRateCents/100}" onchange="setCfg('arRate',this.value)" style="width:88px"></span></div>`;
+}
+function setCfg(k,val){
+  if(k==='client') CONFIG.client=val;
+  else if(k==='arSec') CONFIG.arSec=Math.max(1,parseInt(val)||120);
+  else if(k==='apSec') CONFIG.apSec=Math.max(1,parseInt(val)||630);
+  else if(k==='arRate') CONFIG.arRateCents=Math.max(0,Math.round((parseFloat(val)||0)*100));
+  renderMargin();
+  toast(k==='client'?`Client → ${CONFIG.client}` : k==='arSec'?`AR threshold → ${CONFIG.arSec}s` : k==='apSec'?`AP threshold → ${CONFIG.apSec}s` : `AR rate → ${money(CONFIG.arRateCents/100)}/call`);
 }
 function assignUnknown(i){ const x=UNKNOWN[i]; UNKNOWN.splice(i,1); renderAdmin(); renderHealth(); toast(`Assigned ${x.did} → new sub-vendor · back-filled ${x.calls} calls (one-time, not reassignable)`); }
 const RUNS=[['09:42','inbound_…0930.csv','412','green','ingested'],['09:42','outbound_…0930.csv','388','green','ingested'],
