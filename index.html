@@ -272,14 +272,10 @@
       <div class="cfg" id="clientCfg" style="margin-top:6px;margin-bottom:6px"></div>
       <div class="note" style="margin-top:0;margin-bottom:22px"><b>AR</b> = the client pays us per call <b>connected ≥120s</b> (no consumer dedup — every connected call is revenue). <b>AP</b> = we pay the vendor per <b>≥630s</b> deduped call. The gap (≥120s but not ≥630s, plus repeat/unattributed callers) is <b>in-house margin</b> — billed to the client, no vendor cost. Both thresholds are editable above.</div>
 
-      <h2>Margin Autopilot <span class="pill blue">recommend mode</span></h2>
-      <div style="display:flex;gap:12px;align-items:center;margin-bottom:10px;flex-wrap:wrap">
-        <span class="muted" style="font-size:13px">Target margin / vendor:</span>
-        <input id="apTarget" class="adminEdit num" type="number" value="30" onchange="renderAutopilot()" style="width:64px"> %
-        <span class="muted" style="font-size:12px">proposals only · you approve · applies to the <b>open week</b> · audit-logged</span>
-      </div>
+      <h2>Fraud Autopilot <span class="pill blue">sub-vendor · 1:1 · recommend</span></h2>
+      <div class="note" style="margin-top:0;margin-bottom:10px">Fraud is detected per <b>sub-vendor</b> (its own DID + call-duration pattern). Scrub adjusts <b>one-to-one</b> to each sub-vendor's fraud signal — never a vendor-wide average. <b>Honest</b> sub-vendors get scrub <b>lowered</b> (stop underpaying them); <b>padded</b> ones get it raised. <b>Approve</b> takes the 1:1 recommendation, or <b>type any value</b> in "Scrub now" to manually override. Open week · logged.</div>
       <div id="autopilot"></div>
-      <div class="note" style="margin-bottom:22px">The loop itself is a <b>deterministic controller</b> (a thermostat) — this is its <b>recommend</b> stage. A <b>Claude-API copilot</b> would sit on top: ask "what scrub holds 35% on RedPeak?" in plain English and it proposes a change here for approval. Nothing auto-applies; scrub never touches a locked week.</div>
+      <div class="note" style="margin-bottom:22px">A vendor-aggregate scrub punishes honest sub-vendors and under-catches the fraudulent one — so the engine resolves scrub at <b>sub.scrubRate ?? vendor.scrubRate</b>, per pubID. The <b>Claude-API copilot</b> sits on top: ask "is anyone padding durations on RedPeak?" and it proposes per-sub changes here for approval.</div>
 
       <div class="grid2">
         <div>
@@ -351,12 +347,17 @@ const VENDORS = [
     {name:'GoHealth — Outbound', pub:'gh360-out', did:'3174019409', total:1240, qual:140, fifo:131, lifo:133, login:{status:'active', email:'billing@gohealth360.com'}},
   ]},
 ];
+// Fraud is per SUB-VENDOR (its own DID/duration pattern). Scrub starts at the vendor default
+// applied uniformly (the WRONG aggregate way) so the Fraud Autopilot can correct it to 1:1.
+const FRAUD = {'livmed-day':.04,'livmed-night':.12,'redpeak-a':.03,'redpeak-b':.18,'redpeak-c':.06,'coastal-a':.22,'gh360-out':.03};
+VENDORS.forEach(v=>v.subs.forEach(s=>{ s.fraud = FRAUD[s.pub] ?? 0; s.scrub = v.scrub; }));
+const subScrub = (v,s)=> (s.scrub ?? v.scrub);
 const UNKNOWN = [{did:'3105560148', calls:34, seen:'May 28'},{did:'4694412290', calls:12, seen:'May 30'}];
 const INGESTED=10210, QUALIFIED=951;
 // AP ledger — one invoice per vendor per week, with a payables status (kd2-style)
 const WEEKS=['Jun 1 – Jun 7','May 25 – May 31','May 18 – May 24','May 11 – May 17','May 4 – May 10'];
 const INVOICES=[];
-VENDORS.forEach(v=>{ const base=v.subs.reduce((a,s)=>a+adj(s.fifo,v.scrub)*v.rate,0);
+VENDORS.forEach(v=>{ const base=v.subs.reduce((a,s)=>a+adj(s.fifo,subScrub(v,s))*v.rate,0);
   WEEKS.forEach((w,wi)=>{ const amt=Math.round(base*(1+((wi*13)%7-3)/100));
     const status = wi===0 ? 'unpaid' : (wi===1 ? (v.key==='COASTAL'?'disputed':'unpaid') : (wi===2&&v.key==='REDPEAK'?'paid-direct':'paid'));
     INVOICES.push({vendor:v.key, vname:v.name, week:w, wi, amount:amt, status});
@@ -381,7 +382,7 @@ function scope(){
   if(S.role==='sub'){ const pub=S.subPub||'redpeak-a'; const v=VENDORS.find(x=>x.subs.some(s=>s.pub===pub))||vendorOf('REDPEAK'); return [{...v, subs:v.subs.filter(s=>s.pub===pub)}]; }
   return VENDORS;
 }
-function subBill(v,s){ const c=s[S.method]; return {gross:c, net:adj(c,v.scrub)}; }
+function subBill(v,s){ const c=s[S.method]; return {gross:c, net:adj(c, subScrub(v,s))}; }
 function agg(vs){
   let calls=0,qual=0,gross=0,net=0,arG=0,arN=0;
   vs.forEach(v=>v.subs.forEach(s=>{const b=subBill(v,s);calls+=s.total;qual+=s.qual;gross+=b.gross;net+=b.net;arG+=b.gross*v.rate;arN+=b.net*v.rate;}));
@@ -524,7 +525,7 @@ function renderInvoices(){
 function renderScenario(){
   const lv=VENDORS[0];
   const tf=lv.subs.reduce((x,s)=>x+s.fifo,0), tl=lv.subs.reduce((x,s)=>x+s.lifo,0);
-  const af=lv.subs.reduce((x,s)=>x+adj(s.fifo,lv.scrub),0), al=lv.subs.reduce((x,s)=>x+adj(s.lifo,lv.scrub),0);
+  const af=lv.subs.reduce((x,s)=>x+adj(s.fifo,subScrub(lv,s)),0), al=lv.subs.reduce((x,s)=>x+adj(s.lifo,subScrub(lv,s)),0);
   const cells=[['FIFO · scrub off',tf,tf*lv.rate,false],['FIFO · scrub on',af,af*lv.rate,S.method==='fifo'],
                ['LIFO · scrub off',tl,tl*lv.rate,false],['LIFO · scrub on',al,al*lv.rate,S.method==='lifo']];
   $('#scen').innerHTML=cells.map(([l,c,a,best])=>`<div class="c${best?' best':''}"><div class="lab">${l}${best?' · issuing':''}</div><div class="big num">${c}</div><div class="sm">${money(a)}</div></div>`).join('');
@@ -559,7 +560,7 @@ function lockWeek(){ toast('Week locked — immutable snapshot + BilledLead writ
 function genInvoiceCalls(inv){
   if(inv.calls) return inv.calls;
   const v=vendorOf(inv.vendor), calls=[]; let n=0;
-  v.subs.forEach(s=>{ const cnt=Math.min(8, Math.max(1, Math.round(adj(s.fifo,v.scrub)/30)));
+  v.subs.forEach(s=>{ const cnt=Math.min(8, Math.max(1, Math.round(adj(s.fifo,subScrub(v,s))/30)));
     for(let i=0;i<cnt;i++){ const dur=630+((i*97+inv.wi*31+s.total)%820);
       calls.push({id:'CS-'+s.did.slice(-4)+'-'+inv.wi+(100+n), sub:s.pub, subName:s.name, did:s.did, phone:fakePhone(s,i+inv.wi), dur, amt:v.rate, status:'unpaid'}); n++; }
   });
@@ -606,10 +607,10 @@ function addSub(){
 
 /* ---------- admin + health ---------- */
 function setRate(i,val){ VENDORS[i].rate=Math.max(0,parseInt(val)||0); render(); renderAdmin(); toast(`${VENDORS[i].name} rate → ${money(VENDORS[i].rate)}/call`); }
-function setScrub(i,val){ VENDORS[i].scrub=Math.min(1,Math.max(0,(parseFloat(val)||0)/100)); render(); renderAdmin(); toast(`${VENDORS[i].name} scrub → ${(VENDORS[i].scrub*100).toFixed(0)}% · adjusts vendor-facing only`); }
+function setScrub(i,val){ const v=VENDORS[i]; v.scrub=Math.min(1,Math.max(0,(parseFloat(val)||0)/100)); v.subs.forEach(s=>s.scrub=v.scrub); render(); renderAdmin(); toast(`${v.name} default scrub → ${(v.scrub*100).toFixed(0)}% applied to ALL subs (aggregate) — use Fraud Autopilot for the 1:1 fix`); }
 function renderAdmin(){
-  let h='<p class="muted" style="font-size:12px;margin-bottom:8px"><span class="pill amber">🔒 admin-only</span> <b>Scrub</b> haircuts a call\'s seconds below the AP threshold so padded/fraudulent calls don\'t bill — it\'s a <b>fraud control</b>, never visible to vendors. Editing rate or scrub keeps <b>TRUE billable</b> unchanged while the <b>vendor payout</b> adjusts live.</p>';
-  h+='<table><thead><tr><th>Vendor</th><th>Subs</th><th>Rate $/call</th><th>Scrub % 🔒</th><th>Billable net / gross</th><th>Payout (our AP)</th></tr></thead><tbody>';
+  let h='<p class="muted" style="font-size:12px;margin-bottom:8px"><span class="pill amber">🔒 admin-only</span> <b>Scrub</b> haircuts a call\'s seconds below the AP threshold so padded calls don\'t bill — a <b>fraud control</b>, never shown to vendors. It is resolved <b>per sub-vendor</b> (this column is the vendor <b>default</b> seed; editing it blunt-applies to every sub). Tune it 1:1 to each sub-vendor\'s fraud signal in the <b>Fraud Autopilot</b> below.</p>';
+  h+='<table><thead><tr><th>Vendor</th><th>Subs</th><th>Rate $/call</th><th>Scrub default % 🔒</th><th>Billable net / gross</th><th>Payout (our AP)</th></tr></thead><tbody>';
   VENDORS.forEach((v,i)=>{ const a=agg([v]);
     h+=`<tr><td><b>${v.name}</b> <span class="tag">${v.key}</span></td><td class="num">${v.subs.length}</td>`
      +`<td><input class="adminEdit num" type="number" min="0" value="${v.rate}" onchange="setRate(${i},this.value)" style="width:84px"></td>`
@@ -622,32 +623,34 @@ function renderAdmin(){
     UNKNOWN.forEach((x,i)=>u+=`<tr><td class="mono">${x.did}</td><td class="num">${x.calls}</td><td>${x.seen}</td><td><button class="btn primary sm" onclick="assignUnknown(${i})">Assign →</button></td></tr>`);
     $('#unknownQ').innerHTML=u+'</tbody></table>';
   } else $('#unknownQ').innerHTML='<div class="note" style="margin-top:0;color:var(--green)">✓ Queue clear — all DIDs resolved</div>';
-  renderMargin(); renderAutopilot();
+  renderMargin(); renderFraud();
 }
-function renderAutopilot(){
-  const tEl=$('#apTarget'); if(!tEl) return;
-  const target=Math.max(0,Math.min(0.9,(parseFloat(tEl.value)||30)/100));
-  const arRate=CONFIG.arRateCents/100;
-  let h='<table><thead><tr><th>Vendor</th><th>We pay (AP)</th><th>Margin now</th><th>Target</th><th>Recommendation</th><th></th></tr></thead><tbody>';
-  VENDORS.forEach((v,i)=>{
-    const ap=agg([v]).arN, ar=(v.conn||0)*arRate, margin = ar>0 ? (ar-ap)/ar : 0;
-    let rec, action;
-    if(target-margin>0.01){
-      const proposed=Math.min(0.35, v.scrub + (target-margin));
-      rec=`<span style="color:var(--red)">▲ scrub ${(v.scrub*100).toFixed(0)}% → <b>${(proposed*100).toFixed(0)}%</b></span> <span class="muted">→ ~${(target*100).toFixed(0)}% margin</span>`;
-      action=`<button class="btn primary sm" onclick="applyAutopilot(${i},${proposed.toFixed(3)})">Approve →</button>`;
-    } else { rec='<span style="color:var(--green)">✓ on target</span>'; action='<span class="muted">—</span>'; }
-    h+=`<tr><td><b>${v.name}</b>${v.inhouse?' <span class="pill blue">in-house</span>':''}</td><td class="num">${money(ap)}</td>`
-     +`<td class="num" style="${margin<target?'color:var(--red);font-weight:700':'color:var(--green);font-weight:600'}">${(margin*100).toFixed(0)}%</td>`
-     +`<td class="num">${(target*100).toFixed(0)}%</td><td>${rec}</td><td>${action}</td></tr>`;
-  });
+function renderFraud(){
+  let h='<table><thead><tr><th>Sub-vendor</th><th>Vendor</th><th>Fraud signal</th><th>Scrub now (override)</th><th>Recommended (1:1)</th><th></th></tr></thead><tbody>';
+  VENDORS.forEach(v=>v.subs.forEach((s,si)=>{
+    const cur=subScrub(v,s), rec=s.fraud, d=rec-cur;
+    let recCell, action;
+    if(d>0.005){ recCell=`<span style="color:var(--red)">▲ raise to <b>${(rec*100).toFixed(0)}%</b></span>`; action=`<button class="btn primary sm" onclick="applyFraud('${v.key}',${si})">Approve →</button>`; }
+    else if(d<-0.005){ recCell=`<span style="color:var(--green)">▼ lower to <b>${(rec*100).toFixed(0)}%</b></span> <span class="muted">honest — over-scrubbed</span>`; action=`<button class="btn sm" onclick="applyFraud('${v.key}',${si})">Approve →</button>`; }
+    else { recCell='<span class="muted">✓ matched</span>'; action='<span class="muted">—</span>'; }
+    h+=`<tr><td><b>${s.pub}</b></td><td>${v.name}</td>`
+     +`<td class="num" style="${s.fraud>=.15?'color:var(--red);font-weight:700':''}">${(s.fraud*100).toFixed(0)}%</td>`
+     +`<td><input class="adminEdit num" type="number" min="0" max="100" value="${(cur*100).toFixed(0)}" onchange="setSubScrub('${v.key}',${si},this.value)" style="width:60px" title="Manual override — set any scrub for this sub-vendor"> %</td>`
+     +`<td>${recCell}</td><td>${action}</td></tr>`;
+  }));
   $('#autopilot').innerHTML=h+'</tbody></table>';
 }
-function applyAutopilot(i,proposed){
-  const v=VENDORS[i], old=(v.scrub*100).toFixed(0);
-  v.scrub=parseFloat(proposed);
+function setSubScrub(vkey,si,val){
+  const v=vendorOf(vkey), s=v.subs[si];
+  s.scrub=Math.min(1,Math.max(0,(parseFloat(val)||0)/100));
   renderAdmin(); render();
-  toast(`${v.name} scrub ${old}% → ${(v.scrub*100).toFixed(0)}% approved · open week only · logged`);
+  toast(`${s.pub} scrub override → ${(s.scrub*100).toFixed(0)}% (manual) · open week · logged`);
+}
+function applyFraud(vkey,si){
+  const v=vendorOf(vkey), s=v.subs[si], old=(subScrub(v,s)*100).toFixed(0);
+  s.scrub=s.fraud;
+  renderAdmin(); render();
+  toast(`${s.pub} scrub ${old}% → ${(s.scrub*100).toFixed(0)}% — 1:1 to its fraud signal · open week · logged`);
 }
 function renderMargin(){
   const arRate=CONFIG.arRateCents/100;

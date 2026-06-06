@@ -1,126 +1,97 @@
 #!/usr/bin/env node
-// Margin Autopilot — Claude-API copilot prototype (Pharmacy Call Tracking)
+// Fraud Autopilot — Claude-API copilot prototype (Pharmacy Call Tracking)
 //
-// Natural language in  →  Claude (claude-opus-4-8) parses intent  →  calls a
-// DETERMINISTIC tool that runs the real billing math  →  Claude formats a
-// recommend-only proposal. The LLM never invents margins or scrub values; the
-// numbers always come from the tool. A human approves in the UI; nothing here
-// moves money or touches a locked week.
+// Fraud lives at the SUB-VENDOR grain (each sub-vendor = its own DID + duration
+// pattern). Scrub adjusts ONE-TO-ONE to each sub-vendor's fraud signal — never a
+// vendor-wide average. Claude (claude-opus-4-8) parses the question and calls a
+// DETERMINISTIC tool that runs the real per-sub math; the model never invents a
+// number. It only RECOMMENDS — a human approves, open week only, never a locked
+// invoice. (Margin is held by RATE, not scrub — scrub is fraud control only.)
 //
 // Usage:
 //   export ANTHROPIC_API_KEY=sk-ant-...
-//   npm install            # installs @anthropic-ai/sdk
-//   node margin-copilot.mjs "what scrub holds 35% margin on RedPeak?"
-//   node margin-copilot.mjs                 # default: triage all vendors vs 30%
+//   npm install
+//   node margin-copilot.mjs "is anyone padding call durations on RedPeak?"
+//   node margin-copilot.mjs            # default: triage every sub-vendor
 
 import Anthropic from "@anthropic-ai/sdk";
 
-// ───────────────────────── deterministic engine (mirrors the mockup) ─────────
-const AR_RATE_CENTS = 30000;                       // client pays per connected (>=120s) call
-const adj = (n, sc) => Math.round(n * (1 - sc));   // scrub haircut → fewer billable
-const MAX_SCRUB = 0.35;
-
-// rate $/call, current scrub, conn = connected (>=120s) calls = AR basis, subs = per-sub billable (>=630s, FIFO)
-const VENDORS = {
-  LIVMED:  { name: "LivMed",            rate: 250, scrub: 0.08, conn: 396, subs: [210, 162] },
-  REDPEAK: { name: "RedPeak Media",     rate: 265, scrub: 0.05, conn: 392, subs: [120, 118, 80] },
-  COASTAL: { name: "Coastal Connect",   rate: 240, scrub: 0.12, conn: 182, subs: [219] },
-  GOHEALTH:{ name: "Go Health 360, Inc",rate: 235, scrub: 0.00, conn: 163, subs: [131] },
+// ── deterministic per-sub-vendor engine (mirrors the mockup) ──────────────────
+const round2 = (n) => +n.toFixed(2);
+const SUBS = {
+  "livmed-day":  { vendor: "LivMed",            rate: 250, scrub: 0.08, fraud: 0.04, billable: 210 },
+  "livmed-night":{ vendor: "LivMed",            rate: 250, scrub: 0.08, fraud: 0.12, billable: 162 },
+  "redpeak-a":   { vendor: "RedPeak Media",     rate: 265, scrub: 0.05, fraud: 0.03, billable: 120 },
+  "redpeak-b":   { vendor: "RedPeak Media",     rate: 265, scrub: 0.05, fraud: 0.18, billable: 118 },
+  "redpeak-c":   { vendor: "RedPeak Media",     rate: 265, scrub: 0.05, fraud: 0.06, billable: 80 },
+  "coastal-a":   { vendor: "Coastal Connect",   rate: 240, scrub: 0.12, fraud: 0.22, billable: 219 },
+  "gh360-out":   { vendor: "Go Health 360, Inc",rate: 235, scrub: 0.00, fraud: 0.03, billable: 131 },
 };
+const PUBS = Object.keys(SUBS);
 
-const apCost   = (v, scrub) => v.subs.reduce((a, f) => a + adj(f, scrub) * v.rate, 0);
-const arRev    = (v) => v.conn * (AR_RATE_CENTS / 100);
-
-function getVendorMargin(key) {
-  const v = VENDORS[key]; if (!v) throw new Error(`unknown vendor ${key}`);
-  const ar = arRev(v), ap = apCost(v, v.scrub);
-  return { vendor: v.name, vendorKey: key, currentScrubPct: v.scrub,
-           arRevenue: ar, apCost: ap, marginPct: +( (ar - ap) / ar ).toFixed(4) };
+function recommend(pub) {
+  const s = SUBS[pub]; if (!s) throw new Error(`unknown sub-vendor ${pub}`);
+  const dir = s.fraud > s.scrub + 0.005 ? "raise (under-scrubbed — padding suspected)"
+            : s.fraud < s.scrub - 0.005 ? "lower (honest — currently over-scrubbed)"
+            : "matched";
+  return { pub, vendor: s.vendor, fraudPct: s.fraud, currentScrubPct: s.scrub,
+           recommendedScrubPct: s.fraud, direction: dir,
+           note: "1:1 to this sub-vendor's fraud signal · recommend-only · open week · human approves" };
 }
+const listSubvendors = () =>
+  PUBS.map((p) => ({ pub: p, vendor: SUBS[p].vendor, fraudPct: SUBS[p].fraud, currentScrubPct: SUBS[p].scrub }));
 
-function proposeScrub(key, targetMarginPct) {
-  const v = VENDORS[key]; if (!v) throw new Error(`unknown vendor ${key}`);
-  const ar = arRev(v);
-  const current = getVendorMargin(key).marginPct;
-  // controller step: proportional nudge, clamped to bounds (open week only)
-  const proposed = Math.max(0, Math.min(MAX_SCRUB, v.scrub + (targetMarginPct - current)));
-  const projected = +( (ar - apCost(v, proposed)) / ar ).toFixed(4);
-  return {
-    vendor: v.name, vendorKey: key,
-    currentScrubPct: v.scrub, currentMarginPct: current,
-    targetMarginPct, proposedScrubPct: +proposed.toFixed(3), projectedMarginPct: projected,
-    appliesTo: "open week only", mode: "recommend — human approves", maxScrubPct: MAX_SCRUB,
-  };
-}
-
-// ───────────────────────── tools exposed to Claude ───────────────────────────
-const VKEYS = Object.keys(VENDORS);
+// ── tools exposed to Claude ───────────────────────────────────────────────────
 const tools = [
   {
-    name: "get_vendor_margin",
-    description: "Get the current margin %, AR revenue (client pays us), AP cost (we pay the vendor), and current scrub for one vendor. Call this before reasoning about a vendor's profitability — never estimate these yourself.",
-    input_schema: { type: "object", properties: { vendorKey: { type: "string", enum: VKEYS } }, required: ["vendorKey"] },
+    name: "list_subvendors",
+    description: "List every sub-vendor with its fraud signal and current scrub. Call this first to triage — fraud and scrub are PER SUB-VENDOR, never per vendor.",
+    input_schema: { type: "object", properties: {}, required: [] },
   },
   {
-    name: "propose_scrub",
-    description: "Run the deterministic billing engine to find the scrub rate that brings a vendor to a target margin. Returns current scrub, current margin, proposed scrub, and projected margin. Use this whenever the admin asks 'what scrub hits X% on <vendor>' or to recommend a fix. Scrub is admin-only, applies to the OPEN WEEK only, and is recommend-only (a human approves).",
-    input_schema: {
-      type: "object",
-      properties: {
-        vendorKey: { type: "string", enum: VKEYS },
-        targetMarginPct: { type: "number", description: "target margin as a fraction, e.g. 0.35 for 35%" },
-      },
-      required: ["vendorKey", "targetMarginPct"],
-    },
+    name: "recommend_scrub",
+    description: "For one sub-vendor (by pubID), return the scrub the deterministic engine recommends — set ONE-TO-ONE to that sub-vendor's fraud signal. Honest sub-vendors get scrub LOWERED; padded ones get it RAISED. Recommend-only; a human approves; applies to the open week only.",
+    input_schema: { type: "object", properties: { pub: { type: "string", enum: PUBS } }, required: ["pub"] },
   },
 ];
-
 const runTool = (name, input) =>
-  name === "get_vendor_margin" ? getVendorMargin(input.vendorKey)
-  : name === "propose_scrub"   ? proposeScrub(input.vendorKey, input.targetMarginPct)
+  name === "list_subvendors" ? listSubvendors()
+  : name === "recommend_scrub" ? recommend(input.pub)
   : { error: `unknown tool ${name}` };
 
-const SYSTEM = `You are the Margin Autopilot copilot for "Pharmacy Call Tracking".
-The operator pays vendors (AP) and is paid by the client, Exact Care Pharmacy (AR). Margin = AR − AP.
-Scrub is an admin-only fraud-control duration haircut that lowers AP (and so raises margin).
+const SYSTEM = `You are the Fraud Autopilot copilot for "Pharmacy Call Tracking".
+Vendors send call traffic through sub-vendors (pubIDs). Some sub-vendors pad call durations to push calls over the 630s billable bar so we overpay. Scrub is an admin-only duration haircut that drops padded calls below the bar.
 
 Rules:
-- ALWAYS get numbers from the tools. Never invent a margin, scrub, or projected value.
-- Scrub changes are RECOMMEND-ONLY: you propose, a human approves in the UI, and they apply to the OPEN WEEK only — never a locked invoice. Say so.
-- Vendor keys: ${VKEYS.join(", ")}.
-- Be concise. When proposing, give one line per vendor: "Vendor — scrub A% → B% → ~C% margin". End with a one-line caveat that this is a recommendation a human must approve.`;
+- Fraud and scrub are PER SUB-VENDOR (pubID), never per vendor. Always reason at the sub-vendor grain.
+- Scrub adjusts ONE-TO-ONE to each sub-vendor's fraud signal — never a vendor-wide average. Honest sub-vendors (fraud < scrub) should have scrub LOWERED so we stop underpaying them; padded ones (fraud > scrub) should have it RAISED.
+- ALWAYS get numbers from the tools. Never invent a fraud %, scrub %, or recommendation.
+- This is RECOMMEND-ONLY: you propose, a human approves, and changes apply to the OPEN WEEK only — never a locked invoice. Scrub is fraud control, NOT a margin lever.
+- Be concise. One line per affected sub-vendor: "pubID (Vendor) — scrub A% → B% [raise/lower]". End with a one-line caveat that a human must approve.`;
 
-// ───────────────────────── manual tool-use loop ──────────────────────────────
-const client = new Anthropic(); // reads ANTHROPIC_API_KEY
+// ── manual tool-use loop ──────────────────────────────────────────────────────
+const client = new Anthropic();
 const question = process.argv.slice(2).join(" ")
-  || "Which vendors are below a 30% margin target, and what scrub would bring each to 30%?";
+  || "Triage every sub-vendor: who is padding durations, who is over-scrubbed, and what scrub do you recommend for each?";
 
 let messages = [{ role: "user", content: question }];
-
 while (true) {
   const res = await client.messages.create({
-    model: "claude-opus-4-8",
-    max_tokens: 16000,
-    thinking: { type: "adaptive" },
-    system: SYSTEM,
-    tools,
-    messages,
+    model: "claude-opus-4-8", max_tokens: 16000, thinking: { type: "adaptive" },
+    system: SYSTEM, tools, messages,
   });
-
   if (res.stop_reason !== "tool_use") {
-    const text = res.content.filter((b) => b.type === "text").map((b) => b.text).join("");
-    console.log("\n" + text + "\n");
+    console.log("\n" + res.content.filter((b) => b.type === "text").map((b) => b.text).join("") + "\n");
     break;
   }
-
   messages.push({ role: "assistant", content: res.content });
-  const toolResults = [];
-  for (const block of res.content) {
-    if (block.type === "tool_use") {
-      const out = runTool(block.name, block.input);
-      console.error(`  · ${block.name}(${JSON.stringify(block.input)}) → ${JSON.stringify(out)}`);
-      toolResults.push({ type: "tool_result", tool_use_id: block.id, content: JSON.stringify(out) });
+  const results = [];
+  for (const b of res.content) {
+    if (b.type === "tool_use") {
+      const out = runTool(b.name, b.input);
+      console.error(`  · ${b.name}(${JSON.stringify(b.input)}) → ${JSON.stringify(out)}`);
+      results.push({ type: "tool_result", tool_use_id: b.id, content: JSON.stringify(out) });
     }
   }
-  messages.push({ role: "user", content: toolResults });
+  messages.push({ role: "user", content: results });
 }
