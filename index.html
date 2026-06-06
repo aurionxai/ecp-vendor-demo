@@ -169,7 +169,15 @@
   </header>
 
   <div class="controls">
-    <div class="wk">Broadcast week · <b>Jun 1 – Jun 7, 2026</b></div>
+    <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">
+      <div><label class="flab">From</label><input type="date" id="from" class="adminEdit"></div>
+      <div><label class="flab">To</label><input type="date" id="to" class="adminEdit"></div>
+      <button class="btn sm" data-range="week">This week</button>
+      <button class="btn sm" data-range="lastweek">Last week</button>
+      <button class="btn sm" data-range="month">This month</button>
+      <button class="btn sm" data-range="lastmonth">Last month</button>
+      <button class="btn sm" data-range="today">Today</button>
+    </div>
     <div class="lens" id="lensWrap">
       <span>View</span>
       <span class="seg" id="lensSeg"><button class="on" data-lens="true">TRUE</button><button data-lens="adj">Vendor-facing</button></span>
@@ -226,11 +234,12 @@
           <div><label class="flab">Name</label><input id="nsName" class="teamemail" placeholder="e.g. RedPeak D"></div>
           <div><label class="flab">pubID</label><input id="nsPub" class="teamemail" placeholder="e.g. redpeak-d"></div>
           <div><label class="flab">Assign DID#</label><select id="nsDid" class="teamemail"></select></div>
+          <div><label class="flab">Login email</label><input id="nsEmail" class="teamemail" placeholder="login@subvendor.com"></div>
           <button class="btn primary" onclick="addSub()">Add sub-vendor →</button>
         </div>
         <div class="muted" id="poolNote" style="font-size:12px;margin-top:11px"></div>
       </div>
-      <div class="note">DID#s in the dropdown are <b>pre-provisioned to your account</b> — pick one for each new sub-vendor (1:1 DID↔pubID, permanent). New sub-vendors start at zero and fill in as calls arrive. Each login is <b>scoped to its own pubID</b>; switch the role selector to <b>Sub-vendor</b> to preview it.</div>
+      <div class="note">Each sub-vendor gets its <b>own unique login</b> and sees <b>only its own pubID — one-to-one</b> (its calls, billable count and payout, nothing from siblings). DID#s in the dropdown are <b>pre-provisioned to your account</b> (1:1 DID↔pubID, permanent). Use <b>View 1:1</b> on any row to preview that sub-vendor's scoped view.</div>
     </section>
 
     <!-- ADMIN -->
@@ -303,12 +312,20 @@ const VENDORS = [
 ];
 const UNKNOWN = [{did:'3105560148', calls:34, seen:'May 28'},{did:'4694412290', calls:12, seen:'May 30'}];
 const INGESTED=10210, QUALIFIED=951;
-let S = {role:'admin', lens:'true', method:'fifo'};
+let S = {role:'admin', lens:'true', method:'fifo', subPub:'redpeak-a'};
+const RANGE={factor:1,label:'Jun 1 – Jun 7, 2026'};
+const PRESETS={
+  today:    {factor:0.16,label:'Jun 5, 2026',           from:'2026-06-05',to:'2026-06-05'},
+  week:     {factor:1,   label:'Jun 1 – Jun 7, 2026',   from:'2026-06-01',to:'2026-06-07'},
+  lastweek: {factor:1,   label:'May 25 – May 31, 2026', from:'2026-05-25',to:'2026-05-31'},
+  month:    {factor:4.3, label:'June 2026',             from:'2026-06-01',to:'2026-06-30'},
+  lastmonth:{factor:4.4, label:'May 2026',              from:'2026-05-01',to:'2026-05-31'},
+};
 
 const vendorOf = key => VENDORS.find(v=>v.key===key);
 function scope(){
   if(S.role==='manager') return [vendorOf('LIVMED')];
-  if(S.role==='sub') return [{...vendorOf('REDPEAK'), subs:[vendorOf('REDPEAK').subs[0]]}];
+  if(S.role==='sub'){ const pub=S.subPub||'redpeak-a'; const v=VENDORS.find(x=>x.subs.some(s=>s.pub===pub))||vendorOf('REDPEAK'); return [{...v, subs:v.subs.filter(s=>s.pub===pub)}]; }
   return VENDORS;
 }
 function subBill(v,s){ const c=s[S.method]; return {gross:c, net:adj(c,v.scrub)}; }
@@ -322,44 +339,45 @@ function agg(vs){
 function render(){
   const admin = S.role==='admin', showAdj = admin ? S.lens==='adj' : true;
   const vs = scope(), A = agg(vs);
+  const F=RANGE.factor, sc=x=>Math.round(x*F);   // date-range scaling
   $('#meta').textContent = admin
-    ? `${INGESTED.toLocaleString()} calls ingested · week Jun 1–7`
-    : `${A.calls.toLocaleString()} calls · ${A.net} paid`;
+    ? `${sc(INGESTED).toLocaleString()} calls · ${RANGE.label}`
+    : `${sc(A.calls).toLocaleString()} calls · ${sc(A.net)} billable · ${RANGE.label}`;
 
   // KPIs
   if(admin){
     const bill = showAdj?A.net:A.gross, ar = showAdj?A.arN:A.arG;
-    $('#kpis').innerHTML = card('Gross calls', INGESTED.toLocaleString())
-      + card('Qualified ≥630s', QUALIFIED.toLocaleString(), pct(QUALIFIED/INGESTED)+' of gross')
-      + card('Billable '+(showAdj?'(net)':'(gross)'), bill.toLocaleString(), showAdj?'≥630s':`${S.method.toUpperCase()} keeper`, true)
-      + card('AR · this week', money(ar), `${bill} × rate`, true, true);
+    $('#kpis').innerHTML = card('Gross calls', sc(INGESTED).toLocaleString())
+      + card('Qualified ≥630s', sc(QUALIFIED).toLocaleString(), pct(QUALIFIED/INGESTED)+' of gross')
+      + card('Billable '+(showAdj?'(net)':'(gross)'), sc(bill).toLocaleString(), showAdj?'≥630s':`${S.method.toUpperCase()} keeper`, true)
+      + card('AR', money(sc(ar)), `${sc(bill)} × rate`, true, true);
   } else {
     // VENDOR-FACING — gross calls, billable (≥630s), gross payout. Scrub is never shown.
-    $('#kpis').innerHTML = card('Gross calls', A.calls.toLocaleString())
-      + card('Billable calls', A.net.toLocaleString(), '≥630s talk time')
-      + card('Gross payout', money(A.arN), `${A.net} billable × ${money(scope()[0].rate)}/call`, true, true);
+    $('#kpis').innerHTML = card('Gross calls', sc(A.calls).toLocaleString())
+      + card('Billable calls', sc(A.net).toLocaleString(), '≥630s talk time')
+      + card('Gross payout', money(sc(A.arN)), `${sc(A.net)} billable × ${money(scope()[0].rate)}/call`, true, true);
   }
 
   // main table
   if(admin){
     $('#tblTitle').textContent='Vendor leaderboard';
-    let h='<table><thead><tr><th>Vendor</th><th>Total calls</th><th>Qualified</th><th>Qual %</th><th>Billable</th>'
+    let h='<table><thead><tr><th>Vendor</th><th>Gross calls</th><th>Qualified</th><th>Qual %</th><th>Billable</th>'
       +(showAdj?'':'<th>Scrub</th>')+'<th>Rate</th><th>AR</th></tr></thead><tbody>';
     vs.forEach((v,vi)=>{ const a=agg([v]); const bill=showAdj?a.net:a.gross, ar=showAdj?a.arN:a.arG;
       h+=`<tr class="clk" onclick="drillVendor(${vi})"><td class="v"><a>${v.name}</a> <span class="tag">${v.subs.length} sub${v.subs.length>1?'s':''}</span></td>`
-       +`<td class="num">${a.calls.toLocaleString()}</td><td class="num">${a.qual}</td><td class="pct num">${pct(a.qual/a.calls)}</td>`
-       +`<td class="num">${bill}${showAdj?` <span class="muted" style="font-size:11px">/${a.gross}</span>`:''}</td>`
+       +`<td class="num">${sc(a.calls).toLocaleString()}</td><td class="num">${sc(a.qual)}</td><td class="pct num">${pct(a.qual/a.calls)}</td>`
+       +`<td class="num">${sc(bill)}${showAdj?` <span class="muted" style="font-size:11px">/${sc(a.gross)}</span>`:''}</td>`
        +(showAdj?'':`<td class="num">${(v.scrub*100).toFixed(0)}%</td>`)
-       +`<td class="num">${money(v.rate)}</td><td class="num"><b>${money(ar)}</b></td></tr>`;
+       +`<td class="num">${money(v.rate)}</td><td class="num"><b>${money(sc(ar))}</b></td></tr>`;
     });
     $('#mainTable').innerHTML=h+'</tbody></table>';
   } else {
-    $('#tblTitle').textContent='Your sub-vendors';
-    let h='<table><thead><tr><th>Sub-vendor</th><th>DID</th><th>Total</th><th>Qualified</th><th>Paid</th><th>Rate</th><th>Earnings</th></tr></thead><tbody>';
+    $('#tblTitle').textContent = S.role==='sub' ? `${vs[0].subs[0].name} — my calls (1:1 scoped)` : 'Your sub-vendors';
+    let h='<table><thead><tr><th>Sub-vendor</th><th>DID#</th><th>Gross calls</th><th>Qualified</th><th>Billable</th><th>Rate</th><th>Payout</th></tr></thead><tbody>';
     vs[0].subs.forEach((s,si)=>{ const b=subBill(vs[0],s);
       h+=`<tr class="clk" onclick="drillSub('${vs[0].key}',${si})"><td class="v"><a>${s.pub}</a><div class="sub2">${s.name}</div></td>`
-       +`<td class="mono num">${s.did}</td><td class="num">${s.total.toLocaleString()}</td><td class="num">${s.qual}</td>`
-       +`<td class="num">${b.net}</td><td class="num">${money(vs[0].rate)}</td><td class="num"><b>${money(b.net*vs[0].rate)}</b></td></tr>`;
+       +`<td class="mono num">${s.did}</td><td class="num">${sc(s.total).toLocaleString()}</td><td class="num">${sc(s.qual)}</td>`
+       +`<td class="num">${sc(b.net)}</td><td class="num">${money(vs[0].rate)}</td><td class="num"><b>${money(sc(b.net*vs[0].rate))}</b></td></tr>`;
     });
     $('#mainTable').innerHTML=h+'</tbody></table>';
   }
@@ -382,24 +400,28 @@ function drillVendor(vi){
   });
   openDrill(v.name+' — sub-vendors', `${v.subs.length} sub-vendors · ${(v.scrub*100).toFixed(0)}% scrub · ${money(v.rate)}/call · click a sub for call detail`, h+'</tbody></table>');
 }
-function fakePhone(s,i){
-  const base=(parseInt(s.did.slice(-6))||482137)+i*8389;
-  const ac=300+(base%600), ex=200+((base>>3)%700), ln=(base>>5)%10000;
-  return `(${ac}) ${String(ex).padStart(3,'0')}-${String(ln).padStart(4,'0')}`;
+function hashPhone(s,i){ // salted-HMAC stand-in — deterministic, irreversible, no raw PII
+  let x=((parseInt(s.did.slice(-6))||482137) ^ ((i+1)*2654435761))>>>0;
+  return 'ph_'+x.toString(16).padStart(8,'0').slice(-8);
 }
 function sampleCalls(s){
   const rows=[], dispo=['Transfer Sale','Transfer Sale','No Sale','Voicemail','Transfer Sale','Transfer Sale'];
   for(let i=0;i<16;i++){ const dur=180+((i*173+s.total)%980); const d=dispo[i%dispo.length];
-    rows.push({id:'CS-'+s.did.slice(-4)+'-'+(2200+i), phone:fakePhone(s,i), date:'2026-06-0'+((i%6)+1), dur, dispo:d, billable: dur>=630 && d==='Transfer Sale'}); }
+    rows.push({id:'CS-'+s.did.slice(-4)+'-'+(2200+i), phone:hashPhone(s,i), date:'2026-06-0'+((i%6)+1), dur, dispo:d, billable: dur>=630 && d==='Transfer Sale'}); }
   return rows;
 }
 function drillSub(vkey,si){
-  const v=vendorOf(vkey), s=v.subs[si], rows=sampleCalls(s);
-  let h='<table><thead><tr><th>CallShaper ID</th><th>DID#</th><th>Caller phone</th><th>Date</th><th>Duration (s)</th><th>Disposition</th><th>Billable</th></tr></thead><tbody>';
+  const v=vendorOf(vkey), s=v.subs[si], admin=S.role==='admin';
+  let rows=sampleCalls(s);
+  if(!admin) rows=rows.filter(r=>r.billable);   // vendor sees ONLY billable calls — scrubbed/non-billable never shown
+  let h='<table><thead><tr><th>CallShaper ID</th><th>DID#</th><th>Caller (hashed)</th><th>Date</th><th>Duration (s)</th><th>Disposition</th><th>Billable</th></tr></thead><tbody>';
   rows.forEach(r=>{ h+=`<tr><td class="mono">${r.id}</td><td class="mono">${s.did}</td><td class="mono">${r.phone}</td><td>${r.date}</td>`
     +`<td class="num" style="${r.dur>=630?'color:var(--green);font-weight:600':''}">${r.dur}</td>`
     +`<td>${r.dispo}</td><td>${r.billable?'<span class="pill green">billable</span>':'<span class="pill gray">—</span>'}</td></tr>`; });
-  openDrill(`${s.pub} — calls`, `${s.name} · DID ${s.did} · ${s.total} calls · ${s.qual} qualified ≥630s · sample shown`, h+'</tbody></table>');
+  const meta = admin
+    ? `${s.name} · DID ${s.did} · all calls · phone shown hashed (no raw PII at rest)`
+    : `${s.name} · DID ${s.did} · billable calls only · phone hashed`;
+  openDrill(`${s.pub} — calls`, meta, h+'</tbody></table>');
 }
 
 /* ---------- invoices ---------- */
@@ -445,7 +467,8 @@ function renderTeam(){
   v.subs.forEach((s,si)=>{ const st=s.login.status;
     const chip=st==='active'?'<span class="pill green">Active</span>':st==='invited'?'<span class="pill amber">Invited</span>':'<span class="pill gray">No login</span>';
     const email=st==='none'?`<input class="teamemail" id="te-${si}" placeholder="email@subvendor.com">`:`<span class="mono">${s.login.email}</span>`;
-    const act=st==='active'?`<button class="btn sm" onclick="toast('Reset link sent')">Reset</button>`:`<button class="btn primary sm" onclick="invite(${si})">${st==='invited'?'Resend':'Invite'} →</button>`;
+    const act=(st==='active'?`<button class="btn sm" onclick="toast('Reset link sent')">Reset</button>`:`<button class="btn primary sm" onclick="invite(${si})">${st==='invited'?'Resend':'Invite'} →</button>`)
+      +` <button class="btn sm" onclick="previewSub('${s.pub}')">View 1:1 →</button>`;
     h+=`<tr><td><b>${s.name}</b></td><td class="mono">${s.pub}</td><td class="mono">${s.did}</td><td>${email}</td><td>${chip}</td><td>${act}</td></tr>`;
   });
   $('#teamBody').innerHTML=h+'</tbody></table>';
@@ -455,14 +478,14 @@ function renderTeam(){
 function invite(si){ const v=scope()[0],s=v.subs[si]; const inp=document.getElementById('te-'+si);
   s.login.email=(inp&&inp.value.trim())||s.login.email||`team@${s.pub}.com`; s.login.status='active'; renderTeam(); toast(`Login created for ${s.pub} → ${s.login.email}`); }
 function addSub(){
-  const v=scope()[0], name=$('#nsName').value.trim(), pub=$('#nsPub').value.trim(), did=$('#nsDid').value;
+  const v=scope()[0], name=$('#nsName').value.trim(), pub=$('#nsPub').value.trim(), did=$('#nsDid').value, email=$('#nsEmail').value.trim();
   if(!name||!pub){ toast('Enter a name and pubID'); return; }
   if(!did){ toast('No DID available — request more from Aurion'); return; }
   v.pool=v.pool.filter(d=>d!==did);
-  v.subs.push({name, pub, did, total:0, qual:0, fifo:0, lifo:0, login:{status:'none',email:''}});
-  $('#nsName').value=''; $('#nsPub').value='';
+  v.subs.push({name, pub, did, total:0, qual:0, fifo:0, lifo:0, login:{status: email?'active':'none', email}});
+  $('#nsName').value=''; $('#nsPub').value=''; $('#nsEmail').value='';
   renderTeam(); render();
-  toast(`Sub-vendor ${pub} created · DID ${did} assigned`);
+  toast(email ? `${pub} created · DID ${did} · unique login ${email} (1:1 scoped)` : `${pub} created · DID ${did} · add a login for 1:1 access`);
 }
 
 /* ---------- admin + health ---------- */
@@ -516,7 +539,16 @@ document.querySelectorAll('#lensSeg button').forEach(b=>b.onclick=()=>{ if(S.rol
   document.querySelectorAll('#lensSeg button').forEach(x=>x.classList.toggle('on',x===b)); render(); });
 $('#methToggle').onclick=()=>{ S.method=S.method==='fifo'?'lifo':'fifo'; $('#methToggle').textContent='Try '+(S.method==='fifo'?'LIFO':'FIFO'); render(); toast('Keeper method → '+S.method.toUpperCase()); };
 
-function enterApp(){ $('#portal').classList.add('hide'); $('#app').classList.add('show'); applyRole(); render(); renderAdmin(); }
+// date range
+function setRange(k){ const p=PRESETS[k]; RANGE.factor=p.factor; RANGE.label=p.label; $('#from').value=p.from; $('#to').value=p.to; render(); }
+function customRange(){ const f=$('#from').value,t=$('#to').value; if(!f||!t)return; const days=Math.max(1,Math.round((new Date(t)-new Date(f))/864e5)+1); RANGE.factor=days/7; RANGE.label=f+' → '+t; render(); }
+document.querySelectorAll('.controls [data-range]').forEach(b=>b.onclick=()=>setRange(b.dataset.range));
+$('#from').addEventListener('change',customRange); $('#to').addEventListener('change',customRange);
+
+// preview any sub-vendor's 1:1 scoped view (each sub has a unique login + own-data-only view)
+function previewSub(pub){ S.role='sub'; S.subPub=pub; $('#role').value='sub'; applyRole(); setView('dash'); render(); toast('Previewing 1:1 view — '+pub+' sees only its own data'); }
+
+function enterApp(){ $('#portal').classList.add('hide'); $('#app').classList.add('show'); applyRole(); setRange('week'); renderAdmin(); }
 function goPortal(){ $('#app').classList.remove('show'); $('#portal').classList.remove('hide'); }
 function dlInv(){ toast('Invoice PDF + CSV downloaded'); }
 let tT; function toast(m){ const t=$('#toast'); t.textContent=m; t.classList.add('show'); clearTimeout(tT); tT=setTimeout(()=>t.classList.remove('show'),2400); }
