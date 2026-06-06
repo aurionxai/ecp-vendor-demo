@@ -414,13 +414,13 @@ function drillSub(vkey,si){
   const v=vendorOf(vkey), s=v.subs[si], admin=S.role==='admin';
   let rows=sampleCalls(s);
   if(!admin) rows=rows.filter(r=>r.billable);   // vendor sees ONLY billable calls — scrubbed/non-billable never shown
-  let h='<table><thead><tr><th>CallShaper ID</th><th>DID#</th><th>Caller (hashed)</th><th>Date</th><th>Duration (s)</th><th>Disposition</th><th>Billable</th></tr></thead><tbody>';
-  rows.forEach(r=>{ h+=`<tr><td class="mono">${r.id}</td><td class="mono">${s.did}</td><td class="mono">${r.phone}</td><td>${r.date}</td>`
+  let h='<table><thead><tr><th>CallShaper ID</th><th>DID#</th><th>Date</th><th>Duration (s)</th><th>Disposition</th><th>Billable</th></tr></thead><tbody>';
+  rows.forEach(r=>{ h+=`<tr><td class="mono">${r.id}</td><td class="mono">${s.did}</td><td>${r.date}</td>`
     +`<td class="num" style="${r.dur>=630?'color:var(--green);font-weight:600':''}">${r.dur}</td>`
     +`<td>${r.dispo}</td><td>${r.billable?'<span class="pill green">billable</span>':'<span class="pill gray">—</span>'}</td></tr>`; });
   const meta = admin
-    ? `${s.name} · DID ${s.did} · all calls · phone shown hashed (no raw PII at rest)`
-    : `${s.name} · DID ${s.did} · billable calls only · phone hashed`;
+    ? `${s.name} · DID ${s.did} · all calls · no caller PII shown`
+    : `${s.name} · DID ${s.did} · billable calls only · no caller PII shown`;
   openDrill(`${s.pub} — calls`, meta, h+'</tbody></table>');
 }
 
